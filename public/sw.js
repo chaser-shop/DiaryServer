@@ -1,6 +1,6 @@
 /* Service worker: офлайн-оболонка + Web Push сповіщення. */
-const CACHE = 'diary-shell-v10';
-const SHELL = ['/', '/style.css', '/app.js', '/schedule.js', '/device.js', '/theme.js', '/manifest.webmanifest', '/icons/icon-192.png'];
+const CACHE = 'diary-shell-v11';
+const SHELL = ['/', '/style.css', '/app.js', '/schedule.js', '/rating.js', '/device.js', '/theme.js', '/manifest.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

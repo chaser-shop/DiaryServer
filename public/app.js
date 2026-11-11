@@ -40,7 +40,7 @@
     deviceRequests: 0,
     noHw: new Set(),
     schedMsg: { text: '', cls: 'muted' },
-    rating: { data: null, group: '', err: '' },
+    rating: { data: null, group: '', subject: '', err: '', msg: { text: '', cls: 'muted' } },
     grades: { items: null, lastCheck: null, err: '', checking: false, msg: '', cls: 'muted' },
     notify: { users: null, userId: 'all', title: '', body: '', msg: '', cls: 'muted', sending: false, err: '' },
   };
@@ -200,7 +200,7 @@
 
   function resetLocal() {
     S.lessons = []; S.homework = []; S.subjects = {}; S.teachers = {}; S.scheduleTitle = '';
-    S.answered = new Set(); S.done = new Set(); S.syncError = ''; S.pushEnsured = false; S.rating = { data: null, group: '', err: '' };
+    S.answered = new Set(); S.done = new Set(); S.syncError = ''; S.pushEnsured = false; S.rating = { data: null, group: '', subject: '', err: '', msg: { text: '', cls: 'muted' } };
     LS.del('cache'); LS.set('answered', []); LS.set('done', []);
   }
 
@@ -777,9 +777,12 @@
     if (group !== undefined) R.group = group;
     R.err = '';
     try {
-      const q = isAdmin() && R.group ? '?group=' + encodeURIComponent(R.group) : '';
-      R.data = await api('GET', '/api/rating' + q);
+      const qs = [];
+      if (isAdmin() && R.group) qs.push('group=' + encodeURIComponent(R.group));
+      if (R.subject) qs.push('subject=' + encodeURIComponent(R.subject));
+      R.data = await api('GET', '/api/rating' + (qs.length ? '?' + qs.join('&') : ''));
       if (isAdmin()) R.group = R.data.group;
+      R.subject = R.data.subject || '';
     } catch (e) { if (!quiet) R.err = e.message; }
     render();
     sheets.filter((x) => x.isRatingAdmin).forEach(rerender);
@@ -790,7 +793,7 @@
     if (!me) return '';
     return `<button class="card mini-rank" data-act="tab" data-tab="rating">
       <span class="mr-ic">${ic('trophy', 22)}</span>
-      <span class="mr-t"><small>Рейтинг · ${esc(S.rating.data.group)}</small><b>${me.rank != null ? me.rank + ' місце з ' + S.rating.data.total : 'Бали ще не внесено'}</b></span>
+      <span class="mr-t"><small>Рейтинг · ${esc(S.rating.data.group)}${S.rating.data.subject ? ' · ' + esc(S.rating.data.subject) : ''}</small><b>${me.rank != null ? me.rank + ' місце з ' + S.rating.data.total : 'Бали ще не внесено'}</b></span>
       <span class="mr-p">${esc(ptsText(me.points))}<small>балів</small></span></button>`;
   }
 
@@ -809,10 +812,18 @@
         : '<div class="spin" style="margin:60px auto;width:28px;height:28px"></div>';
     }
     let h = '';
-    if (isAdmin()) {
-      const opts = (d.groups || []).map((g) => `<option value="${esc(g.name)}" ${g.name === d.group ? 'selected' : ''}>${esc(g.name)} · ${g.students}</option>`).join('');
-      h += `<div class="rk-bar"><select class="field" data-chg="ratingGroup" aria-label="Група" ${opts ? '' : 'disabled'}>${opts || '<option>Груп ще немає</option>'}</select>
-        <button class="btn small" data-act="ratingManage">Керувати</button></div>`;
+    const multi = isAdmin() && (d.groups || []).length > 1;
+    if (multi) {
+      const opts = d.groups.map((g) => `<option value="${esc(g.name)}" ${g.name === d.group ? 'selected' : ''}>${esc(g.name)} · ${g.students}</option>`).join('');
+      h += `<div class="rk-bar"><select class="field" data-chg="ratingGroup" aria-label="Група">${opts}</select></div>`;
+    }
+    if ((d.subjects || []).length) {
+      h += `<div class="rk-bar"><select class="field" data-chg="ratingSubject" aria-label="Предмет">
+        <option value="" ${d.subject ? '' : 'selected'}>Загальний рейтинг (сума)</option>
+        ${d.subjects.map((k) => `<option value="${esc(k)}" ${k === d.subject ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
+        ${isAdmin() ? '<button class="btn small" data-act="ratingManage">Керувати</button>' : ''}</div>`;
+    } else if (isAdmin()) {
+      h += '<div class="rk-bar"><button class="btn small" data-act="ratingManage">Керувати</button></div>';
     }
     if (!d.group) {
       return h + card(`<div class="next-title">${isAdmin() ? 'Груп ще немає' : 'Вас ще не додано до групи'}</div>
@@ -823,7 +834,7 @@
     const me = d.entries.find((e) => e.isMe);
     if (me) {
       const subj = Object.entries(me.subjects || {});
-      h += `<div class="card hero"><span class="label">Ваше місце · ${esc(d.group)}</span>
+      h += `<div class="card hero"><span class="label">Ваше місце · ${esc(d.group)}${d.subject ? ' · ' + esc(d.subject) : ''}</span>
         <div class="hero-main">
           <div class="hero-pos"><b>${me.rank != null ? me.rank : '—'}</b><span>${me.rank != null ? 'місце з ' + d.total : 'бали ще не внесено'}</span></div>
           <div class="hero-pts"><b>${esc(ptsText(me.points))}</b><span>балів</span></div></div>
@@ -838,19 +849,33 @@
         <div class="pd-av">${esc(initialsOf(e.fullName))}</div><div class="pd-name">${esc(shortName(e.fullName))}</div>
         <div class="pd-pts">${esc(ptsText(e.points))}</div><div class="pd-step">${e.rank}</div></div>`; }).join('')}</div>`;
     }
-    h += `<div class="section"><div class="sec-head"><span class="label">Рейтинг групи</span><span class="muted small">${d.total} ${studentsWord(d.total)}</span></div>
-      <div class="rk-list">${ranked.length ? ranked.map(rkRow).join('') : '<div class="rk"><span class="muted">Балів ще ніхто не має</span></div>'}</div></div>`;
+    h += `<div class="section"><div class="sec-head"><span class="label">${d.subject ? 'Рейтинг · ' + esc(d.subject) : 'Рейтинг групи'}</span><span class="muted small">${d.total} ${studentsWord(d.total)}</span></div>
+      <div class="rk-list">${ranked.length ? ranked.map(rkRow).join('') : `<div class="rk"><span class="muted">${d.subject ? 'З цього предмета балів ще ніхто не має' : 'Балів ще ніхто не має'}</span></div>`}</div></div>`;
     if (unranked.length) h += `<div class="section"><div class="sec-head"><span class="label">Без балів</span></div><div class="rk-list">${unranked.map(rkRow).join('')}</div></div>`;
-    return h + '<div class="foot">Рейтинг оновлюється автоматично після змін адміністратором. Однакові бали — однакове місце.</div>';
+    return h + '<div class="foot">Рейтинг оновлюється після кожного завантаження таблиці адміністратором. Однакові бали — однакове місце.</div>';
   }
 
   // ───────────── керування рейтингом (адмін) ─────────────
 
   const ratingCols = () => {
-    const cols = [];
+    const cols = [...((S.rating.data && S.rating.data.subjects) || [])];
     for (const e of (S.rating.data && S.rating.data.entries) || []) for (const k of Object.keys(e.subjects || {})) if (!cols.includes(k)) cols.push(k);
     return cols;
   };
+
+  // Блок «Завантажити таблицю рейтингу» (адмін): той самий принцип, що й для розкладу.
+  function ratingUploadBlock() {
+    const R = S.rating;
+    const d = R.data;
+    return `<div><div class="label gl">Таблиця рейтингу</div><div class="list">
+        <div>${!d ? '<span class="muted">Завантаження…</span>' : d.subjects && d.subjects.length
+          ? `<div class="muted small">Студентів: ${d.total} · предмети: ${d.subjects.map(esc).join(', ')}</div>`
+          : '<span class="muted">Таблицю ще не завантажено</span>'}</div>
+        <label class="row" style="cursor:pointer"><span style="color:var(--accent);font-weight:600">Завантажити таблицю (.xlsx / .xls / .csv)</span>
+          <input type="file" data-chg="ratingFile" accept=".xls,.xlsx,.csv,.txt,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden></label>
+        <div class="ratingMsg ${R.msg.cls} small" ${R.msg.text ? '' : 'hidden'}>${esc(R.msg.text)}</div>
+      </div><div class="foot">Перша колонка — ПІБ, далі — бали за кожен предмет (як у вашій таблиці). Новий файл повністю оновлює рейтинг: бали змінюються, нових студентів додано, тих, кого немає у файлі, видалено.</div></div>`;
+  }
 
   function openRatingAdmin() {
     const s = { auto: false, isRatingAdmin: true, form: null, title: () => (s.form ? (s.form.id ? 'Студент' : 'Новий студент') : 'Керування рейтингом') };
@@ -859,8 +884,9 @@
       if (!d) return '<div class="muted">Завантаження…</div>';
       if (s.form) return ratingFormHTML(s.form, d);
       const opts = (d.groups || []).map((g) => `<option value="${esc(g.name)}" ${g.name === d.group ? 'selected' : ''}>${esc(g.name)} · ${g.students}</option>`).join('');
-      let h = '<div class="muted small">Зміни одразу бачать студенти групи. Бали можна змінювати прямо в списку — вони зберігаються після введення.</div>';
-      h += card(`<span class="label">Група</span>
+      let h = ratingUploadBlock();
+      h += '<div class="muted small">Зміни одразу бачать студенти групи. Бали «Разом» можна змінювати прямо в списку, а бали за предметами — у картці студента.</div>';
+      if ((d.groups || []).length > 1 || !d.group) h += card(`<span class="label">Група</span>
         <select class="field" data-chg="ratingGroup" ${opts ? '' : 'disabled'}>${opts || '<option>Груп ще немає</option>'}</select>
         <div class="btn-row"><button class="btn deep" data-act="groupNew">Нова група</button>${d.group ? '<button class="btn deep" data-act="groupRename">Перейменувати</button>' : ''}</div>
         ${d.group && !d.entries.length ? `<button class="btn red" data-act="groupDel" data-name="${esc(d.group)}">Видалити порожню групу</button>` : ''}`);
@@ -919,7 +945,7 @@
   }
 
   function viewAdmin() {
-    return `<div><div class="label gl">Рейтинг і групи</div><div class="list">
+    return `${ratingUploadBlock()}<div><div class="label gl">Рейтинг і групи</div><div class="list">
         ${tile('ratingManage', 'trophy', 'Керування рейтингом', 'Студенти, бали, групи')}
         ${tile('users', 'users', 'Групи, учасники й пристрої', 'Призначення груп, ролі, запити на вхід', S.deviceRequests ? badge(String(S.deviceRequests), 'warn') : '')}
       </div></div>
@@ -1520,6 +1546,26 @@
     }
   }
 
+  async function importRating(file) {
+    const R = S.rating;
+    const say = (text, cls) => {
+      R.msg = { text, cls: cls || 'muted' };
+      document.querySelectorAll('.ratingMsg').forEach((m) => { m.hidden = !text; m.className = 'ratingMsg ' + R.msg.cls + ' small'; m.textContent = text; });
+    };
+    try {
+      say('Читаю файл…');
+      const parsed = RatingParser.parse(await readGrid(file));
+      say(`Відправляю студентів: ${parsed.entries.length}…`);
+      const r = await api('PUT', '/api/admin/rating/import', { subjects: parsed.subjects, entries: parsed.entries });
+      R.group = r.group;
+      R.subject = '';
+      await loadRating(r.group, true);
+      say(`Готово. Студентів: ${r.students}, предметів: ${r.subjects}`, 'ok');
+    } catch (e) {
+      say(e.message || 'Не вдалося завантажити таблицю.', 'err');
+    }
+  }
+
   // ───────────── дії ─────────────
 
   let toastTimer = null;
@@ -1544,7 +1590,7 @@
   }
 
   const ACT = {
-    tab(el) { S.tab = el.dataset.tab; const m0 = $('main.content'); if (m0) m0.scrollTop = 0; render(); const m1 = $('main.content'); if (m1) m1.scrollTop = 0; if (S.tab === 'notify') loadNotifyUsers(); if (S.tab === 'grades') loadGrades(); if (S.tab === 'rating') loadRating(); },
+    tab(el) { S.tab = el.dataset.tab; const m0 = $('main.content'); if (m0) m0.scrollTop = 0; render(); const m1 = $('main.content'); if (m1) m1.scrollTop = 0; if (S.tab === 'notify') loadNotifyUsers(); if (S.tab === 'grades') loadGrades(); if (S.tab === 'rating') loadRating(); if (S.tab === 'admin' && isAdmin() && !S.rating.data) loadRating(undefined, true); },
     go(el) { ACT.tab(el); },
     back() { S.tab = 'admin'; render(); },
     ratingReload() { loadRating(); },
@@ -1868,6 +1914,13 @@
         .catch((e) => { toast(e.message); if (s && s.reload) s.reload(); });
     } else if (el.dataset.chg === 'ratingGroup') {
       loadRating(el.value);
+    } else if (el.dataset.chg === 'ratingSubject') {
+      S.rating.subject = el.value;
+      loadRating();
+    } else if (el.dataset.chg === 'ratingFile' && el.files && el.files[0]) {
+      const f = el.files[0];
+      el.value = '';
+      importRating(f);
     } else if (el.dataset.chg === 'ratingPts') {
       ratingSavePts(el);
     } else if (el.dataset.chg === 'userGroup') {

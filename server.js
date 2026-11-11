@@ -1069,9 +1069,13 @@ const ensureGroup = (name) => groupsCol.updateOne({ _id: name }, { $setOnInsert:
 // Одноразовий безпечний імпорт першої таблиці (seed/rating-101-spd.json). Не перезаписує вже наявні записи.
 async function seedRating() {
   const KEY = 'ratingSeed101spd';
-  if (await config.findOne({ _id: KEY })) return;
   let seed;
   try { seed = JSON.parse(fs.readFileSync(path.join(__dirname, 'seed', 'rating-101-spd.json'), 'utf8')); } catch (e) { return; }
+  // Порядок предметів для вибору в рейтингу (далі його задає завантажена адміністратором таблиця).
+  if (Array.isArray(seed.subjects) && seed.subjects.length) {
+    await config.updateOne({ _id: 'ratingSubjects' }, { $setOnInsert: { value: seed.subjects } }, { upsert: true });
+  }
+  if (await config.findOne({ _id: KEY })) return;
   const now = new Date();
   let added = 0;
   for (const e of seed.entries || []) {
@@ -1087,6 +1091,66 @@ async function seedRating() {
   await config.updateOne({ _id: KEY }, { $set: { value: { at: now, added } } }, { upsert: true });
   console.log(`Рейтинг: імпортовано ${added} студентів групи «${seed.group}».`);
 }
+
+const DEFAULT_RATING_GROUP = '101 СПД';
+
+// Список предметів рейтингу: з останньої завантаженої таблиці, інакше — зі збережених балів.
+async function ratingSubjects() {
+  const c = await config.findOne({ _id: 'ratingSubjects' });
+  if (c && Array.isArray(c.value) && c.value.length) return c.value;
+  const out = [];
+  for (const r of await ratings.find({}, { projection: { subjects: 1 } }).toArray()) {
+    for (const k of Object.keys(r.subjects || {})) if (!out.includes(k)) out.push(k);
+  }
+  return out;
+}
+
+const sumPoints = (subj) => {
+  const v = Object.values(subj);
+  return v.length ? Math.round(v.reduce((a, b) => a + b, 0) * 100) / 100 : null;
+};
+
+// Завантаження таблиці рейтингу (розібраної в браузері адміна): повністю оновлює рейтинг групи.
+// Студенти зіставляються за ПІБ: наявним оновлюються бали, нових додає, яких немає у файлі — видаляє.
+route('PUT', '/api/admin/rating/import', async ({ user, body }) => {
+  const subjList = [];
+  for (const raw of Array.isArray(body.subjects) ? body.subjects.slice(0, 20) : []) {
+    const k = str(raw, 20).replace(/[.$]/g, '').trim();
+    if (k && !subjList.includes(k)) subjList.push(k);
+  }
+  if (!subjList.length) throw new HttpError(400, 'У таблиці немає предметів.');
+  if (!Array.isArray(body.entries) || !body.entries.length) throw new HttpError(400, 'У таблиці немає студентів.');
+  if (body.entries.length > 1000) throw new HttpError(400, 'Забагато студентів у файлі.');
+
+  const group = cleanGroup(body.group) || (await groupOf(user)) || ((await listGroups())[0] || {}).name || DEFAULT_RATING_GROUP;
+  const byKey = new Map();
+  for (const raw of body.entries) {
+    const fullName = normName(raw && raw.fullName);
+    if (fullName.split(' ').length < 2 || fullName.length > 100) continue;
+    const nameKey = ratingKey(fullName);
+    if (byKey.has(nameKey)) continue;
+    const subjects = {};
+    for (const [k, v] of Object.entries(cleanSubjects(raw.subjects))) if (subjList.includes(k)) subjects[k] = v;
+    byKey.set(nameKey, { fullName, nameKey, subjects, points: sumPoints(subjects), note: str(raw.note, 60) });
+  }
+  if (!byKey.size) throw new HttpError(400, 'У таблиці не знайдено жодного коректного ПІБ.');
+
+  const now = new Date();
+  await ratings.deleteMany({ group, nameKey: { $nin: [...byKey.keys()] } });
+  await ratings.bulkWrite([...byKey.values()].map((e) => ({
+    updateOne: {
+      filter: { group, nameKey: e.nameKey },
+      update: {
+        $set: { fullName: e.fullName, subjects: e.subjects, points: e.points, note: e.note, updatedAt: now, source: 'import' },
+        $setOnInsert: { _id: crypto.randomUUID(), createdAt: now },
+      },
+      upsert: true,
+    },
+  })), { ordered: false });
+  await ensureGroup(group);
+  await config.updateOne({ _id: 'ratingSubjects' }, { $set: { value: subjList } }, { upsert: true });
+  return { ok: true, group, students: byKey.size, subjects: subjList.length };
+}, { admin: true });
 
 function readRatingBody(body, full) {
   const set = {};
@@ -1120,9 +1184,15 @@ route('GET', '/api/rating', async ({ user, query }) => {
     groups = await listGroups();
     group = cleanGroup(query.get('group')) || own || (groups[0] ? groups[0].name : '');
   }
-  if (!group) return { group: '', own: '', groups, entries: [], me: null };
+  const subjects = await ratingSubjects();
+  const want = str(query.get('subject'), 20);
+  const subject = subjects.includes(want) ? want : ''; // '' — загальний рейтинг (сума балів)
+  if (!group) return { group: '', own: '', groups, subjects, subject, entries: [], me: null };
   const meKey = ratingKey(user.fullName);
-  const ranked = rankEntries(await ratings.find({ group }).toArray());
+  const rows = await ratings.find({ group }).toArray();
+  const ranked = rankEntries(subject
+    ? rows.map((e) => ({ ...e, points: e.subjects && e.subjects[subject] != null ? e.subjects[subject] : null }))
+    : rows);
   const entries = ranked.map((e) => {
     const isMe = e.nameKey === meKey;
     return {
@@ -1132,7 +1202,7 @@ route('GET', '/api/rating', async ({ user, query }) => {
     };
   });
   const me = entries.find((e) => e.isMe) || null;
-  return { group, own, groups, entries, total: entries.length, me: me && { rank: me.rank, points: me.points } };
+  return { group, own, groups, subjects, subject, entries, total: entries.length, me: me && { rank: me.rank, points: me.points } };
 });
 
 route('GET', '/api/admin/groups', async () => listGroups(), { admin: true });
