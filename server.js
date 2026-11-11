@@ -137,8 +137,8 @@ async function initDb() {
   noHw = db.collection('noHomework'); // пари, на які адміністратор сказав «нічого не задали»
   grades = client.db(GRADES_DB).collection('grades'); // оцінки (заповнюються поза цим сервером; тут лише читаємо)
   gradesSeen = db.collection('gradesSeen'); // id оцінок, про які адміністратора вже сповіщено
-  ratings = db.collection('ratings'); // рейтинг студентів: один запис = студент у групі
-  groupsCol = db.collection('groups'); // навчальні групи (_id = назва)
+  ratings = db.collection('navsrating'); // рейтинг студентів: один запис = студент у групі
+  groupsCol = db.collection('navsrating_groups'); // навчальні групи (_id = назва)
 
   await users.createIndex({ nameKey: 1 }, { unique: true });
   await ratings.createIndex({ group: 1, nameKey: 1 }, { unique: true });
