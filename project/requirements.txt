@@ -1,0 +1,11 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pymongo>=4.7
+pydantic>=2.6
+argon2-cffi>=23.1
+PyJWT>=2.8
+python-multipart>=0.0.9
+# тести
+pytest>=8.0
+httpx>=0.27
+mongomock>=4.1

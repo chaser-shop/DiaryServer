@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Back-office</title>
+<style>
+:root{--bg:#111214;--s:#1b1d21;--s2:#25282e;--t:#e8e9eb;--m:#9096a0;--a:#f5a524;--r:#ef5350;--g:#43c06b;--b:#2f333a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font:14px/1.45 system-ui,sans-serif}
+header{display:flex;gap:8px;align-items:center;padding:10px 16px;background:var(--s);border-bottom:1px solid var(--b);flex-wrap:wrap;position:sticky;top:0;z-index:5}
+header b{margin-right:12px}nav button{background:none;border:0;color:var(--m);padding:8px 12px;cursor:pointer;border-radius:8px;font:inherit}
+nav button.on{background:var(--s2);color:var(--a)}main{padding:16px;max-width:1200px;margin:auto}
+input,select,textarea,button{font:inherit;color:var(--t);background:var(--s2);border:1px solid var(--b);border-radius:8px;padding:7px 10px}
+button{cursor:pointer}button.p{background:var(--a);color:#111;border-color:var(--a);font-weight:600}button.d{color:var(--r)}
+label{display:block;color:var(--m);font-size:12px;margin:8px 0 3px}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;background:var(--s);border-radius:10px;overflow:hidden}th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--b)}
+th{color:var(--m);font-weight:500;font-size:12px}tr.c:hover{background:var(--s2);cursor:pointer}.w{overflow-x:auto}
+.tag{padding:2px 8px;border-radius:99px;font-size:12px;background:var(--s2)}.bad{color:var(--r)}.warn{color:var(--a)}.ok{color:var(--g)}
+.card{background:var(--s);border:1px solid var(--b);border-radius:12px;padding:16px;margin-bottom:12px}
+#modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;padding:12px;z-index:9}
+#modal>div{background:var(--s);border-radius:14px;padding:20px;max-width:560px;width:100%;max-height:90vh;overflow:auto}
+#toast{position:fixed;bottom:16px;right:16px;background:var(--s2);border:1px solid var(--b);padding:10px 14px;border-radius:10px;display:none;z-index:10}
+.muted{color:var(--m)}img.th{width:84px;height:84px;object-fit:cover;border-radius:8px;background:var(--s2)}
+#login{max-width:340px;margin:12vh auto}
+</style>
+</head>
+<body>
+<div id="login" class="card" style="display:none">
+  <h2>Вхід</h2>
+  <label for="u">Логін</label><input id="u" autocomplete="username" style="width:100%">
+  <label for="pw">Пароль</label><input id="pw" type="password" autocomplete="current-password" style="width:100%">
+  <p id="lerr" class="bad"></p><button class="p" id="lbtn" style="width:100%">Увійти</button>
+</div>
+<div id="app" style="display:none">
+<header><b>Back-office</b><nav id="nav"></nav><span style="flex:1"></span><span id="who" class="muted"></span><button id="out">Вийти</button></header>
+<main id="main"></main></div>
+<div id="modal"><div id="mbody"></div></div><div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let token=sessionStorage.getItem('t'),cart={},CATS=[],BRANDS=[];
+const CL={liquid:'Рідини',pod:'Под-системи',cartridge:'Картриджі (пачки)',booster:'Підсилювачі'};
+const COMP={blocked_by_law:['Заборонено законом','bad'],hold_legal_review:['Очікує юр. перевірки','warn']};
+const money=v=>v==null?'—':Number(v).toLocaleString('uk-UA',{minimumFractionDigits:0,maximumFractionDigits:2})+' грн';
+function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.color=bad?'var(--r)':'var(--t)';t.style.display='block';setTimeout(()=>t.style.display='none',3500)}
+async function api(path,opt={}){
+  const h={...(opt.headers||{}),Authorization:'Bearer '+token};
+  if(opt.json){h['Content-Type']='application/json';opt.body=JSON.stringify(opt.json)}
+  let r;try{r=await fetch(path,{...opt,headers:h})}catch(e){toast('Немає зв\'язку із сервером',1);throw e}
+  if(r.status===401&&!path.includes('/auth/login')){logout();throw new Error('auth')}
+  const d=r.headers.get('content-type')?.includes('json')?await r.json():await r.blob();
+  if(!r.ok){const m=typeof d.detail==='string'?d.detail:'Помилка '+r.status;toast(m,1);throw new Error(m)}
+  return d}
+function logout(){sessionStorage.removeItem('t');token=null;show()}
+function show(){const on=!!token;$('#login').style.display=on?'none':'block';$('#app').style.display=on?'block':'none';if(on)init()}
+$('#lbtn').onclick=async()=>{try{const d=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({username:$('#u').value,password:$('#pw').value})});const j=await d.json();
+  if(!d.ok){$('#lerr').textContent=j.detail||'Помилка входу';return}
+  token=j.token;sessionStorage.setItem('t',token);$('#pw').value='';$('#lerr').textContent='';show()}catch{$('#lerr').textContent='Сервер недоступний'}};
+$('#pw').onkeydown=e=>{if(e.key==='Enter')$('#lbtn').click()};$('#out').onclick=logout;
+const TABS={products:'Товари',cart:'Нове замовлення',orders:'Замовлення',pricing:'Націнки',import:'Імпорт'};
+async function init(){const me=await api('/api/auth/me');$('#who').textContent=me.username;BRANDS=await api('/api/brands');
+  $('#nav').innerHTML=Object.entries(TABS).map(([k,v])=>`<button data-k="${k}">${v}</button>`).join('');
+  $('#nav').onclick=e=>e.target.dataset.k&&go(e.target.dataset.k);go('products')}
+function go(k){document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.k===k));({products:vProducts,cart:vCart,orders:vOrders,pricing:vPricing,import:vImport})[k]()}
+function modal(html){$('#mbody').innerHTML=html;$('#modal').style.display='flex'}function closeM(){$('#modal').style.display='none'}
+$('#modal').onclick=e=>{if(e.target.id==='modal')closeM()};
+/* ---------- Товари ---------- */
+let PF={q:'',category:'',brand:'',status:'',compliance:'',sort:'name',page:1};
+async function vProducts(){
+  const sel=(id,opts,v)=>`<select id="${id}">${opts.map(([a,b])=>`<option value="${esc(a)}" ${a===v?'selected':''}>${esc(b)}</option>`).join('')}</select>`;
+  $('#main').innerHTML=`<div class="row"><div><label for="q">Пошук</label><input id="q" value="${esc(PF.q)}" placeholder="Назва, бренд, модель"></div>
+  <div><label for="category">Категорія</label>${sel('category',[['','Усі'],...Object.entries(CL)],PF.category)}</div>
+  <div><label for="brand">Бренд</label>${sel('brand',[['','Усі'],...BRANDS.map(b=>[b,b])],PF.brand)}</div>
+  <div><label for="status">Наявність</label>${sel('status',[['','Усі'],['in_stock','В наявності'],['expected','Очікується'],['unavailable','Немає']],PF.status)}</div>
+  <div><label for="compliance">Юр. статус</label>${sel('compliance',[['','Усі'],['blocked_by_law','Заборонено законом'],['hold_legal_review','Очікує перевірки']],PF.compliance)}</div>
+  <div><label for="sort">Сортування</label>${sel('sort',[['name','Назва'],['price_asc','Ціна ↑'],['price_desc','Ціна ↓']],PF.sort)}</div>
+  <button class="p" id="add">+ Товар</button></div><div id="list">Завантаження…</div>`;
+  ['q','category','brand','status','compliance','sort'].forEach(id=>$('#'+id).onchange=()=>{PF[id]=$('#'+id).value;PF.page=1;loadP()});
+  $('#add').onclick=addForm;loadP()}
+async function loadP(){const qs=new URLSearchParams({...PF,limit:30});const d=await api('/api/products?'+qs);
+  if(!d.items.length){$('#list').innerHTML='<div class="card muted">Нічого не знайдено</div>';return}
+  $('#list').innerHTML=`<div class="w"><table><tr><th>Назва</th><th>Бренд</th><th>Категорія</th><th>Закупівля</th><th>Націнка</th><th>Ціна</th><th>Статус</th><th>Юр.</th></tr>
+  ${d.items.map(p=>{const c=COMP[p.compliance?.status]||['','']; return `<tr class="c" data-id="${esc(p.id)}"><td>${esc(p.name)}</td><td>${esc(p.brand)}</td><td>${esc(p.category_label)}</td>
+  <td>${money(p.purchase_price)}</td><td>${money(p.markup)}</td><td><b>${money(p.final_price)}</b></td><td>${esc(p.status_label)}</td><td class="${c[1]}">${esc(c[0])}</td></tr>`}).join('')}</table></div>
+  <div class="row" style="margin-top:12px"><button id="pv" ${d.page<=1?'disabled':''}>←</button><span class="muted">Стор. ${d.page} з ${d.pages} · ${d.total} товарів</span><button id="nx" ${d.page>=d.pages?'disabled':''}>→</button></div>`;
+  $('#list').querySelectorAll('tr.c').forEach(r=>r.onclick=()=>detail(r.dataset.id));
+  $('#pv').onclick=()=>{PF.page--;loadP()};$('#nx').onclick=()=>{PF.page++;loadP()}}
+async function detail(id){const p=await api('/api/products/'+id);const c=COMP[p.compliance?.status]||['','']; const blocked=p.compliance?.status==='blocked_by_law';
+  modal(`<h3>${esc(p.name)}</h3><div class="muted">${esc(p.brand)} · ${esc(p.category_label)}</div>
+  <p class="${c[1]}">${esc(c[0])}${p.compliance?.reasons?.length?' ('+esc(p.compliance.reasons.join(', '))+')':''}</p>
+  <div id="imgs" class="row"></div>
+  <p>Ціна: <b>${money(p.final_price)}</b>${p.final_price_usdt?` · <b>${esc(p.final_price_usdt)} USDT</b> <span class="muted">(курс ${esc(p.usdt.rate)})</span>`:''}</p>
+  <p class="muted">Закупівля ${money(p.purchase_price)}${p.usdt?` (${esc(p.usdt.purchase)} USDT)`:''} + націнка ${money(p.markup)}</p>
+  <p>Статус: ${esc(p.status_label)}${p.volume_ml?` · ${esc(p.volume_ml)} мл`:''}${p.nicotine_mg?` · ${esc(p.nicotine_mg)} мг`:''}${p.pack_size?` · пачка ${esc(p.pack_size)} шт`:''}</p>
+  <label for="ep">Закупівельна ціна, грн</label><input id="ep" value="${esc(p.purchase_price)}">
+  <label for="es">Наявність</label><select id="es">${[['in_stock','В наявності'],['expected','Очікується'],['unavailable','Немає']].map(([a,b])=>`<option value="${a}" ${a===p.status?'selected':''}>${b}</option>`).join('')}</select>
+  <div class="row" style="margin-top:14px"><button class="p" id="sv">Зберегти</button>
+  <button id="ac" ${blocked||p.status!=='in_stock'||p.final_price==null?'disabled title="Недоступно для замовлення"':''}>У замовлення</button>
+  <button class="d" id="dl">Видалити</button><button id="cl">Закрити</button></div>`);
+  (p.images||[]).slice(0,3).forEach(async src=>{try{const b=await api('/api/media/'+src.split('/').pop());const i=new Image();i.className='th';i.alt='Групове фото';i.src=URL.createObjectURL(b);$('#imgs').append(i)}catch{}});
+  if(p.image_scope)$('#imgs').insertAdjacentHTML('afterend','<div class="muted" style="font-size:12px">Фото загальне для '+(p.image_scope==='line'?'лінійки':'моделі')+', не для цього смаку/кольору</div>');
+  $('#cl').onclick=closeM;
+  $('#sv').onclick=async()=>{await api('/api/products/'+id,{method:'PATCH',json:{purchase_price:$('#ep').value,status:$('#es').value}});toast('Збережено');closeM();loadP()};
+  $('#ac').onclick=()=>{cart[id]={name:p.name,price:p.final_price,qty:(cart[id]?.qty||0)+1};toast('Додано в замовлення');closeM()};
+  $('#dl').onclick=async()=>{if(!confirm('Видалити «'+p.name+'»? Дію не можна скасувати.'))return;await api('/api/products/'+id+'?confirm=true',{method:'DELETE'});toast('Видалено');closeM();loadP()}}
+function addForm(){modal(`<h3>Новий товар</h3><label for="nn">Назва</label><input id="nn" style="width:100%"><label for="nb">Бренд</label><input id="nb" style="width:100%">
+  <label for="nc">Категорія</label><select id="nc">${Object.entries(CL).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
+  <label for="np">Закупівельна ціна, грн</label><input id="np"><div class="row" style="margin-top:14px"><button class="p" id="ns">Створити</button><button id="cl">Скасувати</button></div>`);
+  $('#cl').onclick=closeM;$('#ns').onclick=async()=>{await api('/api/products',{method:'POST',json:{name:$('#nn').value,brand:$('#nb').value,category:$('#nc').value,purchase_price:$('#np').value}});toast('Створено');BRANDS=await api('/api/brands');closeM();vProducts()}}
+/* ---------- Замовлення ---------- */
+function vCart(){const ids=Object.keys(cart);
+  if(!ids.length){$('#main').innerHTML='<div class="card muted">Замовлення порожнє. Відкрийте товар у розділі «Товари» й натисніть «У замовлення».</div>';return}
+  let total=0;const rows=ids.map(i=>{const c=cart[i];total+=c.price*c.qty;return `<tr><td>${esc(c.name)}</td><td>${money(c.price)}</td><td><input type="number" min="1" max="1000" value="${c.qty}" data-q="${esc(i)}" style="width:70px"></td><td>${money(c.price*c.qty)}</td><td><button class="d" data-r="${esc(i)}">✕</button></td></tr>`}).join('');
+  $('#main').innerHTML=`<div class="w"><table><tr><th>Товар</th><th>Ціна</th><th>К-сть</th><th>Сума</th><th></th></tr>${rows}</table></div>
+  <p>Орієнтовно: <b>${money(total)}</b> <span class="muted">(остаточну суму розрахує сервер)</span></p>
+  <div class="row"><div><label for="cn">Клієнт</label><input id="cn"></div><div><label for="cc">Контакт</label><input id="cc"></div><button class="p" id="co">Створити замовлення</button></div>`;
+  document.querySelectorAll('[data-q]').forEach(e=>e.onchange=()=>{cart[e.dataset.q].qty=Math.max(1,Math.min(1000,+e.value||1));vCart()});
+  document.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{delete cart[b.dataset.r];vCart()});
+  $('#co').onclick=async()=>{const o=await api('/api/orders',{method:'POST',json:{customer_name:$('#cn').value,contact:$('#cc').value,items:ids.map(i=>({product_id:i,qty:cart[i].qty}))}});cart={};toast('Створено '+o.number);go('orders')}}
+let OF={number:'',status:'',date_from:'',date_to:''},ST={};
+async function vOrders(){$('#main').innerHTML=`<div class="row"><div><label for="on">Номер</label><input id="on" value="${esc(OF.number)}"></div><div><label for="os">Статус</label><select id="os"></select></div>
+  <div><label for="od1">Від</label><input id="od1" type="date" value="${OF.date_from}"></div><div><label for="od2">До</label><input id="od2" type="date" value="${OF.date_to}"></div></div><div id="ol">Завантаження…</div>`;
+  const run=async()=>{OF={number:$('#on').value,status:$('#os').value,date_from:$('#od1').value,date_to:$('#od2').value};
+    const d=await api('/api/orders?'+new URLSearchParams(OF));ST=d.statuses;
+    $('#os').innerHTML='<option value="">Усі</option>'+Object.entries(ST).map(([k,v])=>`<option value="${k}" ${k===OF.status?'selected':''}>${v}</option>`).join('');
+    $('#ol').innerHTML=d.items.length?`<div class="w"><table><tr><th>Номер</th><th>Дата</th><th>Клієнт</th><th>Сума</th><th>Статус</th></tr>${d.items.map(o=>`<tr class="c" data-n="${esc(o.number)}"><td>${esc(o.number)}</td><td>${esc(o.created_at.slice(0,10))}</td><td>${esc(o.customer.name)}</td><td>${money(o.total)}</td><td>${esc(ST[o.status])}</td></tr>`).join('')}</table></div>`:'<div class="card muted">Замовлень немає</div>';
+    d.items.forEach(o=>{const r=$(`tr[data-n="${CSS.escape(o.number)}"]`);r.onclick=()=>order(o)});};
+  ['on','od1','od2'].forEach(i=>$('#'+i).onchange=run);$('#os').onchange=run;await run()}
+function order(o){modal(`<h3>${esc(o.number)}</h3><p>${esc(o.customer.name)} <span class="muted">${esc(o.customer.contact)}</span></p>
+  <table>${o.items.map(i=>`<tr><td>${esc(i.name)}</td><td>${i.qty} × ${money(i.unit_price)}</td><td>${money(i.line_total)}</td></tr>`).join('')}</table>
+  <p><b>Разом: ${money(o.total)}</b> <span class="muted">(ціни зафіксовані на момент замовлення)</span></p>
+  <label for="ost">Статус</label><select id="ost">${Object.entries(ST).map(([k,v])=>`<option value="${k}" ${k===o.status?'selected':''}>${v}</option>`).join('')}</select>
+  <label>Примітки</label><div>${o.notes.map(n=>`<div class="muted">${esc(n.at.slice(0,16).replace('T',' '))} ${esc(n.by)}: ${esc(n.text)}</div>`).join('')||'<span class="muted">немає</span>'}</div>
+  <div class="row" style="margin-top:8px"><input id="nt" placeholder="Нова примітка" style="flex:1"><button id="na">Додати</button></div>
+  <div class="row"><button class="p" id="ok">Зберегти статус</button><button id="cl">Закрити</button></div>`);
+  $('#cl').onclick=closeM;$('#ok').onclick=async()=>{await api(`/api/orders/${o.number}/status`,{method:'PATCH',json:{status:$('#ost').value}});toast('Статус збережено');closeM();vOrders()};
+  $('#na').onclick=async()=>{if(!$('#nt').value.trim())return;const u=await api(`/api/orders/${o.number}/notes`,{method:'POST',json:{text:$('#nt').value}});order(u)}}
+/* ---------- Націнки ---------- */
+async function vPricing(){const m=await api('/api/pricing/markups');
+  $('#main').innerHTML=`<div class="card"><h3>Націнки, грн</h3>${Object.entries(CL).map(([k,v])=>`<label for="m_${k}">${v}</label><input id="m_${k}" value="${esc(m[k])}">`).join('')}
+  <div class="row" style="margin-top:12px"><button id="pvw">Попередній перегляд</button><button class="p" id="apl">Застосувати</button></div><div id="pr"></div>
+  <p class="muted">Нові ціни рахуються від закупівельної, тому націнка не додається повторно. Старі замовлення не змінюються.</p></div>`;
+  const body=()=>({markups:Object.fromEntries(Object.keys(CL).map(k=>[k,$('#m_'+k).value]))});
+  $('#pvw').onclick=async()=>{const d=await api('/api/pricing/markups/preview',{method:'POST',json:body()});
+    $('#pr').innerHTML=`<p>Зміниться товарів: <b>${d.affected}</b></p>`+d.sample.map(s=>`<div class="muted">${esc(s.name)}: ${money(s.old)} → ${money(s.new)}</div>`).join('')};
+  $('#apl').onclick=async()=>{if(!confirm('Застосувати націнки й перерахувати ціни?'))return;const d=await api('/api/pricing/markups',{method:'PUT',json:body()});toast('Перераховано товарів: '+d.repriced)}}
+/* ---------- Імпорт ---------- */
+function vImport(){$('#main').innerHTML=`<div class="card"><h3>Імпорт прайсу (products_clean.json)</h3><input type="file" id="f" accept=".json">
+  <div class="row" style="margin-top:12px"><button id="dr">Попередній перегляд</button><button class="p" id="ap">Імпортувати</button></div><pre id="rep" class="muted" style="white-space:pre-wrap"></pre></div>`;
+  const run=async dry=>{const f=$('#f').files[0];if(!f){toast('Оберіть файл',1);return}if(!dry&&!confirm('Записати зміни в базу?'))return;
+    const fd=new FormData();fd.append('file',f);const r=await api('/api/import?dry_run='+dry,{method:'POST',body:fd});
+    $('#rep').textContent=`Рядків: ${r.total_rows}\nДодати: ${r.to_insert}\nОновити: ${r.to_update}\nБез змін: ${r.unchanged}\nПропущено (недоступні): ${r.skipped_unavailable}\nПомилок: ${r.errors.length}\n`+r.errors.map(e=>`  #${e.row} ${e.name}: ${e.error}`).join('\n')+(dry?'\n\n(тільки перегляд, нічого не записано)':'\n\nГотово.')};
+  $('#dr').onclick=()=>run(true);$('#ap').onclick=()=>run(false)}
+show();
+</script>
+</body></html>

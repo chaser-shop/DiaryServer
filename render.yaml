@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: navsstudents
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: ADMIN_NAMES
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
