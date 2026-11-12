@@ -89,7 +89,7 @@ API: `GET /api/rating[?subject=СПОУ]` · `PUT /api/admin/rating/import` · `
 | `GOOGLE_SHEET_ID` | `1grET3-MHCkBXqrBrHL1BIiUnAks0Kh3P4MuOijcPykY` | ID Google-таблиці |
 | `GOOGLE_SHEET_GID` | `0` | ID аркуша (gid з URL потрібної вкладки) |
 | `GOOGLE_SHEET_GROUP` | `101 СПД` | Група, до якої імпортувати студентів |
-| `GOOGLE_SHEET_INTERVAL_MS` | `300000` | Інтервал перевірки в мілісекундах (5 хвилин) |
+| `GOOGLE_SHEET_INTERVAL_MS` | `120000` | Інтервал перевірки в мілісекундах (2 хвилини, мінімум 60000) |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | JSON ключ сервісного акаунта | Секрет для приватного читання Google-таблиці |
 
 **Приватний доступ до таблиці (рекомендовано):** створіть Google Cloud service account, увімкніть Google Sheets API, створіть JSON-ключ і додайте його в Render як секретну змінну `GOOGLE_SERVICE_ACCOUNT_JSON` (вставте весь JSON одним значенням). Поділіться самою таблицею лише з email сервісного акаунта з правом **Читач**. Не вмикайте загальний доступ «Усі, хто має посилання»: таблиця містить ПІБ та оцінки студентів. Сервер використовує лише scope `spreadsheets.readonly` і не змінює Google-таблицю.
