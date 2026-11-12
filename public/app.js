@@ -119,6 +119,7 @@
     archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v12h14V8M10 12h4"/>',
     edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
     external: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3"/>',
+    layers: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
   };
   const ic = (name, size = 22) =>
     `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -207,6 +208,8 @@
     LS.set('done', [...S.done]);
   }
 
+  // Сервер щойно прокинувся й ще читає Google-таблицю: перевіримо ще раз за кілька секунд, без ручного оновлення.
+  const sheetRetry = { n: 0, timer: null };
   async function sync() {
     if (!S.token) return;
     S.syncing = true;
@@ -218,6 +221,11 @@
       S.syncError = '';
       loadRating(undefined, true);
       runHooks('sync');
+      clearTimeout(sheetRetry.timer);
+      if (r.sheetPending && sheetRetry.n < 6) {
+        sheetRetry.n++;
+        sheetRetry.timer = setTimeout(() => { if (S.user) sync(); }, 8000);
+      } else if (!r.sheetPending) sheetRetry.n = 0;
       await ensurePush();
       maybeAskPush();
     } catch (e) {
@@ -476,6 +484,16 @@
     },
     dayGroup: (v) => { const d = new Date(v); return sameDay(d, new Date()) ? 'Сьогодні' : sameDay(d, addDays(new Date(), -1)) ? 'Учора' : cap(fmt.date(d)); },
     plural: (n, one, few, many) => { const a = Math.abs(n) % 100; const b = a % 10; return !Number.isInteger(n) ? few : a > 10 && a < 20 ? many : b === 1 ? one : b >= 2 && b <= 4 ? few : many; },
+    /** «1 бал», «3 бали», «7 балів», «7,5 бала» (дробові — родовий однини). */
+    points: (n) => `${fmt.num(n)} ${Number.isInteger(n) ? fmt.plural(n, 'бал', 'бали', 'балів') : 'бала'}`,
+    /** Час події: «сьогодні, 18:07», «учора, 09:15», інакше «12 листопада, 18:07». */
+    when: (v) => {
+      const d = v ? new Date(v) : null;
+      if (!d || Number.isNaN(d.getTime())) return '—';
+      if (sameDay(d, new Date())) return `сьогодні, ${hm(d)}`;
+      if (sameDay(d, addDays(new Date(), -1))) return `учора, ${hm(d)}`;
+      return fmt.dateTime(d);
+    },
   };
 
   const SOURCE_TITLES = { sheet: 'Google-таблиця', student: 'Студент', admin: 'Адміністратор', import: 'Імпорт файлу', seed: 'Початкові дані', migration: 'Перенесення даних' };
@@ -500,7 +518,7 @@
         <div class="k-val">${value}${unit ? `<small>${esc(unit)}</small>` : ''}</div><div class="k-sub">${sub}</div></${tag}>`;
     },
     src: (s, text) => `<span class="badge src-${['sheet', 'student', 'admin', 'import'].includes(s) ? s : 'other'}">${esc(text || SOURCE_TITLES[s] || 'Інше')}</span>`,
-    srcIcon: (s) => `<span class="feed-ic ${['sheet', 'student', 'admin', 'import'].includes(s) ? s : ''}">${ic(s === 'sheet' ? 'sheet' : s === 'student' ? 'user' : s === 'admin' ? 'shield' : s === 'import' ? 'upload' : 'clock', 17)}</span>`,
+    srcIcon: (s) => `<span class="feed-ic ${['sheet', 'student', 'admin', 'import'].includes(s) ? 'fi-' + s : ''}">${ic(s === 'sheet' ? 'sheet' : s === 'student' ? 'user' : s === 'admin' ? 'shield' : s === 'import' ? 'upload' : 'clock', 17)}</span>`,
     change: (oldV, newV) => `<span class="change"><s>${esc(fmt.num(oldV))}</s> → ${esc(fmt.num(newV))}</span>`,
     progress: (value, max, cls = '') => `<div class="progress ${cls}"><i style="width:${Math.max(0, Math.min(100, max ? (value / max) * 100 : 0)).toFixed(1)}%"></i></div>`,
     pager(p, act) {
@@ -511,6 +529,30 @@
         <button class="btn small ghost" data-act="${act}" data-page="${p.page + 1}" ${p.page >= p.pages ? 'disabled' : ''}>Далі ${ic('right', 16)}</button></div></div>`;
     },
     seg: (items, cur, act, attrs = '') => `<div class="seg inline" role="group" ${attrs}>${items.map(([v, t]) => `<button class="${v === cur ? 'on' : ''}" data-act="${act}" data-v="${esc(v)}">${esc(t)}</button>`).join('')}</div>`,
+    /** «75 → 82»; відсутнє значення — «—». */
+    scoreValues: (oldV, newV) => `<span class="sc-vals"><span class="sc-old">${esc(fmt.num(oldV))}</span><span class="sc-arr" aria-hidden="true">→</span><b>${esc(fmt.num(newV))}</b></span>`,
+    /** «+7 балів» / «−3 бали». Перший і прибраний бал — словами: різниці з нулем тут немає. */
+    scoreDelta(oldV, newV) {
+      const has = (v) => typeof v === 'number' && Number.isFinite(v);
+      if (!has(oldV) && has(newV)) return '<span class="sc-delta new">новий бал</span>';
+      if (has(oldV) && !has(newV)) return '<span class="sc-delta down">бал прибрано</span>';
+      if (!has(oldV)) return '';
+      const d = Math.round((newV - oldV) * 100) / 100;
+      if (!d) return '<span class="sc-delta flat">без змін</span>';
+      return `<span class="sc-delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '+' : '−'}${esc(fmt.points(Math.abs(d)))}</span>`;
+    },
+    /** Зміна балу — один вигляд на всіх сторінках: предмет, хто/коли, «75 → 82» і «+7 балів». */
+    scoreChange(h, { who = '', source = '' } = {}) {
+      const subj = h.subjectTitle || h.subject;
+      const at = new Date(h.at);
+      const iso = Number.isNaN(at.getTime()) ? '' : at.toISOString();
+      return `<div class="sc-item">${ui.srcIcon(h.source)}
+        <div class="sc-main"><div class="sc-subj">${esc(subj)}${subj !== h.subject ? ` <span class="sc-key">${esc(h.subject)}</span>` : ''}</div>
+          ${who ? `<div class="sc-who">${who}</div>` : ''}
+          <div class="sc-meta"><time datetime="${esc(iso)}" title="${esc(fmt.dateTime(h.at))}">${esc(fmt.when(h.at))}</time>${source ? ` · ${source}` : ''}</div>
+          ${h.reason ? `<div class="sc-reason">${esc(h.reason)}</div>` : ''}</div>
+        <div class="sc-side">${ui.scoreValues(h.oldValue, h.newValue)}${ui.scoreDelta(h.oldValue, h.newValue)}</div></div>`;
+    },
   };
 
   function lessonRow(l) {
@@ -924,6 +966,13 @@
     const ranked = d.entries.filter((e) => e.rank != null);
     const unranked = d.entries.filter((e) => e.rank == null);
     const me = d.entries.find((e) => e.isMe);
+    const sh = d.sheet || {};
+    const asOf = sh.lastSuccessAt ? ` (станом на ${esc(fmt.when(sh.lastSuccessAt))})` : '';
+    if (sh.enabled && sh.failing) {
+      h += ui.notice('warn', isAdmin()
+        ? `Не вдалося оновити дані з Google-таблиці${sh.error ? `: ${esc(sh.error)}` : ''}. Показано останні збережені бали${asOf}. <button class="link" data-act="go" data-tab="admin" data-sub="sync">Деталі синхронізації</button>`
+        : `Не вдалося отримати свіжі дані з Google-таблиці. Показано останні збережені бали${asOf}.`);
+    }
     if (d.archived) h += ui.notice('warn', 'Ваш запис у рейтингу архівовано (вас немає в актуальній Google-таблиці). Зверніться до адміністратора, якщо це помилка.');
     if (me) {
       h += `<div class="card hero"><span class="label">Ваше місце · ${esc(d.group)}${d.subject ? ' · ' + esc(ratingTitle(d.subject)) : ''}</span>
@@ -943,7 +992,8 @@
     h += `<div class="section"><div class="sec-head"><h2>${d.subject ? 'Рейтинг · ' + esc(ratingTitle(d.subject)) : 'Рейтинг групи'}</h2><span class="muted small">${d.total} ${studentsWord(d.total)}</span></div>
       <div class="rk-list">${ranked.length ? ranked.map(rkRow).join('') : `<div class="rk"><span class="muted">${d.subject ? 'З цього предмета балів ще ніхто не має' : 'Балів ще ніхто не має'}</span></div>`}</div></div>`;
     if (unranked.length) h += `<div class="section"><div class="sec-head"><h2>Без балів</h2></div><div class="rk-list">${unranked.map(rkRow).join('')}</div></div>`;
-    return h + '<div class="foot">Рейтинг оновлюється автоматично після синхронізації з Google-таблицею та після кожної зміни балів. Однакові бали — однакове місце.</div>';
+    const fresh = sh.enabled && sh.lastSuccessAt ? ` Дані з Google-таблиці перевірено ${esc(fmt.when(sh.lastSuccessAt))}.` : '';
+    return h + `<div class="foot">Рейтинг оновлюється автоматично після синхронізації з Google-таблицею та після кожної зміни балів. Однакові бали — однакове місце.${fresh}</div>`;
   }
 
   // ───────────── керування рейтингом (адмін) ─────────────
@@ -981,8 +1031,7 @@
       h += '<div class="muted small">Зміни одразу бачать студенти групи. Бали «Разом» можна змінювати прямо в списку, а бали за предметами — у картці студента.</div>';
       if ((d.groups || []).length > 1 || !d.group) h += card(`<span class="label">Група</span>
         <select class="field" data-chg="ratingGroup" ${opts ? '' : 'disabled'}>${opts || '<option>Груп ще немає</option>'}</select>
-        <div class="btn-row"><button class="btn deep" data-act="groupNew">Нова група</button>${d.group ? '<button class="btn deep" data-act="groupRename">Перейменувати</button>' : ''}</div>
-        ${d.group && !d.entries.length ? `<button class="btn red" data-act="groupDel" data-name="${esc(d.group)}">Видалити порожню групу</button>` : ''}`);
+        <div class="btn-row"><button class="btn deep" data-act="groupsManage">${ic('layers', 18)} Керувати групами</button></div>`);
       if (!d.group) return h;
       h += `<button class="btn" data-act="ratingAdd">${ic('plus', 18)} Додати студента</button>`;
       h += d.entries.length ? `<div class="list">${d.entries.map((e) => `<div class="ra-row">
@@ -1125,9 +1174,8 @@
     {
       id: 'progress', title: 'Успішність', short: 'Успішність', icon: 'chart', subs: [
         { id: 'scores', title: 'Мої бали', icon: 'target' },
-        { id: 'stats', title: 'Статистика', icon: 'bars' },
         { id: 'rating', title: 'Рейтинг групи', icon: 'trophy' },
-        { id: 'history', title: 'Історія змін', icon: 'clock' },
+        { id: 'stats', title: 'Статистика', icon: 'bars' },
       ],
     },
     {
@@ -1135,6 +1183,7 @@
         { id: 'overview', title: 'Огляд', icon: 'grid' },
         { id: 'analytics', title: 'Аналітика', icon: 'chart' },
         { id: 'students', title: 'Студенти', icon: 'users' },
+        { id: 'groups', title: 'Групи', icon: 'layers' },
         { id: 'sync', title: 'Google Sheets', icon: 'sheet' },
         { id: 'conflicts', title: 'Конфлікти', icon: 'alert' },
         { id: 'history', title: 'Історія балів', icon: 'clock' },
@@ -1258,7 +1307,7 @@
             <button class="icon-btn" data-act="go" data-tab="notifications" aria-label="Сповіщення" title="Сповіщення">${ic('bell', 21)}${dot(S.unread)}</button>
           </div></header>
         <main class="content ${entering ? 'enter' : ''}"><div class="page">
-          ${subnav ? `<nav class="subnav tb-mobile" aria-label="Розділи">${subnav.map((s) => `<button class="${s.id === cur.sub.id ? 'on' : ''}" data-act="go" data-tab="${cur.tab.id}" data-sub="${s.id}">${esc(s.title)}${dot(badgeFor(cur.tab.id + '/' + s.id))}</button>`).join('')}</nav>` : ''}
+          ${subnav ? `<nav class="subnav tb-mobile ${subnav.length <= 4 ? 'fit' : ''}" aria-label="Розділи">${subnav.map((s) => `<button class="${s.id === cur.sub.id ? 'on' : ''}" data-act="go" data-tab="${cur.tab.id}" data-sub="${s.id}" ${s.id === cur.sub.id ? 'aria-current="page"' : ''}>${esc(s.title)}${dot(badgeFor(cur.tab.id + '/' + s.id))}</button>`).join('')}</nav>` : ''}
           ${cur.page.render()}
         </div></main>
         <nav class="tabbar" aria-label="Навігація"><div class="tabbar-in">${navVisible().filter((t) => !t.hideInTabbar).map((t) => `
@@ -1266,6 +1315,10 @@
       </div>`;
     const newMain = $('main.content');
     if (newMain) newMain.scrollTop = y;
+    // Довгий ряд підрозділів на телефоні: активний пункт завжди видно (по центру ряду).
+    const sn = $('.subnav:not(.fit)', app);
+    const on = sn && $('.on', sn);
+    if (on && sn.scrollWidth > sn.clientWidth) sn.scrollLeft = Math.max(0, on.offsetLeft - sn.offsetLeft - (sn.clientWidth - on.offsetWidth) / 2);
     if (focus) {
       const el = document.getElementById(focus.id);
       if (el) { el.focus(); try { el.setSelectionRange(focus.s, focus.e); } catch (e) { /* поле без курсора */ } }
@@ -1850,26 +1903,12 @@
       });
     },
     async ratingDel(el) {
-      if (!confirm(`Видалити «${el.dataset.name}» з рейтингу?`)) return;
+      if (!confirm(`Видалити «${el.dataset.name}» з рейтингу?\n\nЯкщо студент є в Google-таблиці, під час наступної синхронізації його буде додано знову. Щоб прибрати студента з рейтингу без втрати даних, архівуйте його в картці студента (Адміністрування → Студенти).`)) return;
       await withBusy(el, async () => {
         try { await api('DELETE', `/api/admin/rating/${encodeURIComponent(el.dataset.id)}`); toast('Видалено'); await loadRating(); } catch (e) { toast(e.message); }
       });
     },
-    async groupNew() {
-      const name = (prompt('Назва нової групи (наприклад, 101 СПД)') || '').trim();
-      if (!name) return;
-      try { await api('POST', '/api/admin/groups', { name }); await loadRating(name); } catch (e) { toast(e.message); }
-    },
-    async groupRename() {
-      const from = S.rating.data.group;
-      const to = (prompt('Нова назва групи', from) || '').trim();
-      if (!to || to === from) return;
-      try { await api('PATCH', '/api/admin/groups', { from, to }); toast('Групу перейменовано'); await loadRating(to); } catch (e) { toast(e.message); }
-    },
-    async groupDel(el) {
-      if (!confirm(`Видалити порожню групу «${el.dataset.name}»?`)) return;
-      try { await api('DELETE', `/api/admin/groups/${encodeURIComponent(el.dataset.name)}`); toast('Групу видалено'); await loadRating(''); } catch (e) { toast(e.message); }
-    },
+    groupsManage() { closeSheet(); go('admin', 'groups'); },
     gradesReload() { loadGrades(); },
     async gradesCheck() {
       const g = S.grades;

@@ -104,7 +104,7 @@
         if (seg.length === 1 || n <= 45) svg += seg.map((p) => `<circle class="dot" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${seg.length === 1 ? 4 : 2.6}" style="fill:${color}"/>`).join('');
       }
     });
-    el.innerHTML = `<svg width="${w}" height="${H}" viewBox="0 0 ${w} ${H}">${svg}<line class="guide" y1="${padT}" y2="${padT + ph}" x1="-10" x2="-10" visibility="hidden"/></svg><div class="chart-tip" hidden></div>`;
+    el.innerHTML = `<svg width="${w}" height="${H}" viewBox="0 0 ${w} ${H}">${svg}<line class="guide" y1="${padT}" y2="${padT + ph}" x1="-10" x2="-10" display="none"/></svg><div class="chart-tip" hidden></div>`;
     hover(el, { n, x, pw, padL, labels: cfg.tipLabels || labels, series, fmt, y });
   }
 
@@ -144,7 +144,7 @@
         svg += `<rect class="bar" x="${bx.toFixed(1)}" y="${top.toFixed(1)}" width="${Math.max(1, bw - (per > 1 ? 2 : 0)).toFixed(1)}" height="${hgt.toFixed(1)}" rx="${Math.min(5, bw / 3).toFixed(1)}" style="fill:${color}"/>`;
       });
     }
-    el.innerHTML = `<svg width="${w}" height="${H}" viewBox="0 0 ${w} ${H}">${svg}<rect class="band" y="${padT}" height="${ph}" x="-100" width="${slot.toFixed(1)}" visibility="hidden"/></svg><div class="chart-tip" hidden></div>`;
+    el.innerHTML = `<svg width="${w}" height="${H}" viewBox="0 0 ${w} ${H}">${svg}<rect class="band" y="${padT}" height="${ph}" x="-100" width="${slot.toFixed(1)}" display="none"/></svg><div class="chart-tip" hidden></div>`;
     hover(el, { n, x, pw, padL, slot, labels: cfg.tipLabels || labels, series, fmt, bars: true, total: stacked && series.length > 1 ? totals : null });
   }
 
@@ -159,8 +159,8 @@
       const i = g.bars ? Math.floor((px - g.padL) / g.slot) : Math.round(((px - g.padL) / (g.pw || 1)) * (g.n - 1));
       if (i < 0 || i >= g.n || Number.isNaN(i)) { tip.hidden = true; return; }
       const cx = g.x(i);
-      if (guide) { guide.setAttribute('x1', cx); guide.setAttribute('x2', cx); guide.setAttribute('visibility', 'visible'); }
-      if (band) { band.setAttribute('x', (cx - g.slot / 2).toFixed(1)); band.setAttribute('visibility', 'visible'); }
+      if (guide) { guide.setAttribute('x1', cx); guide.setAttribute('x2', cx); guide.removeAttribute('display'); }
+      if (band) { band.setAttribute('x', (cx - g.slot / 2).toFixed(1)); band.removeAttribute('display'); }
       const rows = g.series.map((s) => `<div><i style="background:${s.color || 'var(--accent)'}"></i>${s.name ? esc(s.name) + ': ' : ''}<b>${esc(g.fmt(s.values[i]))}</b></div>`).join('');
       tip.innerHTML = `<div class="tt">${esc(g.labels[i])}</div>${rows}${g.total ? `<div class="tsum">Разом: <b>${esc(g.fmt(g.total[i]))}</b></div>` : ''}`;
       tip.hidden = false;
@@ -169,8 +169,8 @@
     };
     const leave = () => {
       tip.hidden = true;
-      if (guide) guide.setAttribute('visibility', 'hidden');
-      if (band) band.setAttribute('visibility', 'hidden');
+      if (guide) guide.setAttribute('display', 'none');
+      if (band) band.setAttribute('display', 'none');
     };
     svg.addEventListener('pointermove', move);
     svg.addEventListener('pointerdown', move);

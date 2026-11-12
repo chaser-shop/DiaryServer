@@ -150,13 +150,19 @@ h1, h2, h3, h4 { margin: 0; letter-spacing: -.02em; }
 .tab:active { transform: scale(.96); }
 .tab .dot { position: absolute; top: 3px; left: 50%; margin-left: 5px; }
 
-/* підрозділи сторінки */
-.subnav { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: -2px -16px 0; padding: 2px 16px 4px; }
+/* підрозділи сторінки: довгий ряд гортається (активний пункт прокручується в центр), короткий — ділить ширину порівну */
+.subnav {
+  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: -2px -16px 0; padding: 2px 16px 4px;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+}
 .subnav::-webkit-scrollbar { display: none; }
 .subnav button {
   flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px; font-size: 13.5px; font-weight: 600;
   color: var(--text-2); background: var(--surface); box-shadow: var(--shadow); white-space: nowrap; transition: background .15s, color .15s;
 }
+.subnav.fit { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); overflow: visible; -webkit-mask-image: none; mask-image: none; }
+.subnav.fit button { justify-content: center; text-align: center; white-space: normal; line-height: 1.2; padding: 8px 6px; min-height: 38px; }
 .subnav button.on { background: var(--text); color: var(--bg); }
 .subnav .dot { min-width: 18px; height: 18px; border-radius: 9px; background: var(--red-btn); color: #fff; font-size: 10.5px; display: grid; place-items: center; padding: 0 5px; }
 
@@ -204,7 +210,7 @@ h1, h2, h3, h4 { margin: 0; letter-spacing: -.02em; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 46px; padding: 11px 18px;
   border-radius: var(--r-sm); background: var(--accent); color: var(--on-accent); font-size: 15px; font-weight: 650; text-align: center;
-  transition: transform .15s var(--ease), opacity .15s, filter .15s, background .15s; white-space: nowrap;
+  transition: transform .15s var(--ease), opacity .15s, filter .15s, background .15s; white-space: normal; text-wrap: balance; max-width: 100%;
 }
 .btn:active { transform: scale(.98); }
 .btn:disabled { opacity: .45; cursor: default; transform: none; }
@@ -214,7 +220,7 @@ h1, h2, h3, h4 { margin: 0; letter-spacing: -.02em; }
 .btn.outline { background: transparent; color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .btn.soft { background: var(--accent-soft); color: var(--accent); }
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.btn-row .btn { flex: 1; }
+.btn-row .btn { flex: 1 1 auto; }
 .btn.big { min-height: 52px; font-size: 16px; }
 .btn.small, .btn.auto { width: auto; }
 .btn.small { min-height: 36px; padding: 7px 13px; font-size: 13.5px; border-radius: 10px; }
@@ -251,6 +257,10 @@ a.btn { text-decoration: none; }
 .field.invalid { border-color: var(--red); box-shadow: 0 0 0 4px var(--red-soft); }
 textarea.field { min-height: 96px; resize: vertical; }
 select.field { appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 19px) 52%, calc(100% - 14px) 52%; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 34px; }
+/* Поле не ширше за свій контейнер: <select> за замовчуванням займає ширину найдовшого варіанта
+   (довга назва предмета чи ПІБ) і виштовхував сторінку за межі екрана телефона. */
+.field { min-width: 0; max-width: 100%; }
+select.field { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 input[type="date"].field { -webkit-appearance: none; appearance: none; }
 @media (max-width: 720px) { .field { font-size: 16px; } }
 .form { display: flex; flex-direction: column; gap: 14px; }
@@ -281,6 +291,8 @@ button.kpi:active { transform: scale(.985); }
 .kpi .k-ic.sky { background: var(--sky-soft); color: var(--sky); }
 .kpi .k-ic.red { background: var(--red-soft); color: var(--red); }
 .kpi .k-val { font-size: 28px; font-weight: 780; letter-spacing: -.03em; line-height: 1.05; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Текст замість числа («Немає даних») переноситься, а не обрізається на вузьких екранах. */
+.kpi .k-val.k-txt { font-size: 19px; white-space: normal; overflow: visible; }
 .kpi .k-val small { font-size: 14px; font-weight: 600; color: var(--muted); letter-spacing: 0; margin-left: 2px; }
 .kpi .k-sub { font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 20px; }
 
@@ -381,7 +393,7 @@ button.kpi:active { transform: scale(.985); }
 .tbl .sub { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
 .tbl th.sortable { cursor: pointer; }
 .tbl th.sorted { color: var(--accent); }
-@media (max-width: 760px) {
+@media (max-width: 1023px) {
   .tbl-wrap.stack { border: 0; background: none; box-shadow: none; overflow: visible; }
   .tbl.stack thead { display: none; }
   .tbl.stack, .tbl.stack tbody, .tbl.stack tr, .tbl.stack td { display: block; width: 100%; }
@@ -405,10 +417,11 @@ button.kpi:active { transform: scale(.985); }
 .feed-item { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: flex-start; }
 .feed-item:last-child { border-bottom: 0; }
 .feed-ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex: none; background: var(--surface-2); color: var(--muted); }
-.feed-ic.sheet { background: var(--sky-soft); color: var(--sky); }
-.feed-ic.student { background: var(--accent-soft); color: var(--accent); }
-.feed-ic.admin { background: var(--warn-soft); color: var(--warn); }
-.feed-ic.import { background: var(--green-soft); color: var(--green); }
+/* «fi-» — щоб не збігатися з класом шторки .sheet (height: 100%), через який значок розтягувався. */
+.feed-ic.fi-sheet { background: var(--sky-soft); color: var(--sky); }
+.feed-ic.fi-student { background: var(--accent-soft); color: var(--accent); }
+.feed-ic.fi-admin { background: var(--warn-soft); color: var(--warn); }
+.feed-ic.fi-import { background: var(--green-soft); color: var(--green); }
 .feed-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .feed-body .t { font-weight: 600; font-size: 14px; }
 .feed-body .d { font-size: 12.5px; color: var(--muted); }
@@ -636,7 +649,12 @@ img.broken { opacity: .35; }
 
 /* ───────── малі екрани ───────── */
 html[data-device="320x568"], html[data-device="375x667"] { --tab-h: 50px; }
-@media (max-width: 360px) { .tab { font-size: 9.5px; } .content { padding-left: 12px; padding-right: 12px; } .hero-pos b { font-size: 48px; } .kpi .k-val { font-size: 24px; } }
+@media (max-width: 360px) {
+  .tab { font-size: 9.5px; } .content { padding-left: 12px; padding-right: 12px; } .hero-pos b { font-size: 48px; } .kpi .k-val { font-size: 24px; }
+  /* Відступ ряду підрозділів збігається з відступом сторінки, інакше ряд виступав за край на 4 px. */
+  .subnav { margin-left: -12px; margin-right: -12px; padding-left: 12px; padding-right: 12px; }
+  .subnav.fit button { font-size: 12.5px; padding: 7px 4px; }
+}
 @media (max-width: 400px) { .tabbar-in:has(.tab:nth-child(6)) .tab { font-size: 9.5px; } .topbar h1 { font-size: 19px; } }
 
 /* ───────── планшет ───────── */
@@ -698,7 +716,42 @@ html[data-device="320x568"], html[data-device="375x667"] { --tab-h: 50px; }
 .toolbar input[type="date"].field { flex: 0 1 165px; }
 .toolbar .seg.inline { flex-wrap: wrap; }
 .warn-list { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text-2); display: flex; flex-direction: column; gap: 4px; }
-@media (max-width: 760px) {
+@media (max-width: 1023px) {
   .tbl.stack tr { display: flex; flex-direction: column; }
   .tbl.stack td.head { order: -1; }
 }
+
+/* ───────── зміни балів: один формат для всього застосунку ───────── */
+.sc-list { display: flex; flex-direction: column; }
+.sc-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 12px; align-items: start; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.sc-item:first-child { padding-top: 2px; }
+.sc-item:last-child { border-bottom: 0; padding-bottom: 0; }
+.sc-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sc-subj { font-size: 14.5px; font-weight: 650; line-height: 1.3; overflow-wrap: anywhere; }
+.sc-key { font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.sc-who { font-size: 13.5px; line-height: 1.3; overflow-wrap: anywhere; }
+.sc-meta, .sc-reason { font-size: 12.5px; line-height: 1.35; color: var(--muted); overflow-wrap: anywhere; }
+.sc-reason { color: var(--text-2); }
+.sc-side { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; text-align: right; }
+.sc-vals { display: inline-flex; align-items: baseline; gap: 5px; font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sc-vals .sc-old { color: var(--muted); font-weight: 600; }
+.sc-vals .sc-arr { color: var(--faint); }
+.sc-vals b { font-weight: 750; }
+.sc-delta { padding: 2px 8px; border-radius: 99px; font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sc-delta.up { color: var(--green); background: var(--green-soft); }
+.sc-delta.down { color: var(--red); background: var(--red-soft); }
+.sc-delta.new { color: var(--sky); background: var(--sky-soft); }
+.sc-delta.flat { color: var(--muted); background: var(--surface-2); }
+.sc-cell { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+@media (max-width: 380px) {
+  .sc-item { grid-template-columns: auto minmax(0, 1fr); }
+  .sc-side { grid-column: 2; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 8px; text-align: left; }
+}
+
+/* ───────── групи ───────── */
+.a-group-head { display: flex; align-items: flex-start; gap: 10px; }
+.a-group-name { overflow-wrap: anywhere; }
+.a-group-actions .btn { flex: none; }
+.a-inline-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.a-inline-form .field { flex: 1 1 200px; width: auto; min-width: 0; }
+.btn.a-danger { color: var(--red); }
