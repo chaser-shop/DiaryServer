@@ -3,6 +3,7 @@
  * Щоденник студента — сервер.
  * Node.js + MongoDB + Web Push. Віддає вебверсію (папка public) і REST API,
  * сумісний із iOS-застосунком (/api/auth/login, /api/sync, /api/homework …).
+ * Електронний журнал успішності (бали, історія, статистика, синхронізація з Google Sheets) — у папці lib/.
  */
 
 const http = require('http');
@@ -11,6 +12,17 @@ const path = require('path');
 const crypto = require('crypto');
 const { MongoClient } = require('mongodb');
 const webpush = require('web-push');
+
+const ctx = require('./lib/context');
+const { HttpError, clampInt, str, toDate, sha, normName, normKey, dayKey, localHour, weekdayOf } = require('./lib/util');
+const { audit, summarize } = require('./lib/audit');
+const sync = require('./lib/sync');
+const stats = require('./lib/stats');
+const notify = require('./lib/notify');
+const { migrate } = require('./lib/migrate');
+const ratingRoutes = require('./lib/routes/rating');
+const meRoutes = require('./lib/routes/me');
+const adminRoutes = require('./lib/routes/admin');
 
 // ───────────────────────── Налаштування ─────────────────────────
 
@@ -26,11 +38,12 @@ const deviceLimitReached = (user) => MAX_DEVICES > 0 && user.deviceIds.length >=
 // Підтвердження нового пристрою адміністратором: за замовчуванням вимкнено (звичайні учасники входять одразу).
 // Щоб повернути: REQUIRE_DEVICE_APPROVAL=true. Для акаунтів адміністраторів захист (пароль/підтвердження) лишається завжди.
 const REQUIRE_DEVICE_APPROVAL = process.env.REQUIRE_DEVICE_APPROVAL === 'true';
-const GOOGLE_SHEET_ID = (process.env.GOOGLE_SHEET_ID || '1grET3-MHCkBXqrBrHL1BIiUnAks0Kh3P4MuOijcPykY').trim();
-const GOOGLE_SHEET_GID = (process.env.GOOGLE_SHEET_GID || '0').trim();
-const GOOGLE_SHEET_GROUP = (process.env.GOOGLE_SHEET_GROUP || '101 СПД').trim();
-const GOOGLE_SERVICE_ACCOUNT_JSON = (process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '').trim();
-const GOOGLE_SHEET_INTERVAL_MS = Math.max(60000, parseInt(process.env.GOOGLE_SHEET_INTERVAL_MS, 10) || 5 * 60 * 1000);
+// Змінювати власні бали можна лише з довіреного пристрою (першого або підтвердженого адміністратором).
+// Вхід лише за ПІБ, тому без цього будь-хто, хто знає чуже ПІБ, міг би підвищити чужі бали. Вимкнути: SCORE_EDIT_TRUSTED_DEVICES_ONLY=false.
+const TRUSTED_DEVICES_ONLY = process.env.SCORE_EDIT_TRUSTED_DEVICES_ONLY !== 'false';
+const DEFAULT_MAX_SCORE = Math.max(1, Number(process.env.DEFAULT_MAX_SCORE) || 100);
+const DIGEST_HOUR = clampInt(process.env.DIGEST_HOUR, 0, 23, 20);
+if (!process.env.GOOGLE_SHEET_ID && process.env.GOOGLE_SHEET_ID !== '') process.env.GOOGLE_SHEET_ID = '1grET3-MHCkBXqrBrHL1BIiUnAks0Kh3P4MuOijcPykY';
 
 // Apple відхиляє підписи сповіщень (403 BadJwtToken), якщо «sub» фіктивний (example.com, you@…).
 // Тому підставну адресу замінюємо на https-адресу самого сервісу, а в логах просимо вказати реальну.
@@ -48,36 +61,10 @@ const TICK_MS = parseInt(process.env.SCHEDULER_INTERVAL_MS, 10) || 30000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_BODY = 5 * 1024 * 1024;
 
-const normName = (s) => String(s || '').replace(/\s+/g, ' ').trim();
-const normKey = (s) => normName(s).toLocaleLowerCase('uk');
 const ADMIN_NAMES = new Set((process.env.ADMIN_NAMES || '').split(',').map(normKey).filter(Boolean));
-
-if (!MONGODB_URI) {
-  console.error('Не задано MONGODB_URI. Додайте змінну середовища з рядком підключення до MongoDB.');
-  process.exit(1);
-}
 
 // ───────────────────────── Утиліти ─────────────────────────
 
-class HttpError extends Error {
-  constructor(status, message, extra) {
-    super(message);
-    this.status = status;
-    this.extra = extra || {};
-  }
-}
-
-const clampInt = (v, min, max, def) => {
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : def;
-};
-const str = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
-const toDate = (v) => {
-  if (v == null || v === '') return null;
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? null : d;
-};
-const sha = (s) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 32);
 const safeEq = (a, b) => {
   const x = Buffer.from(String(a));
   const y = Buffer.from(String(b));
@@ -101,6 +88,7 @@ function cleanSettings(s) {
     leadMinutes: clampInt(s.leadMinutes, 1, 15, 2),
     askHomework: s.askHomework !== false,
     notifyHomework: s.notifyHomework !== false,
+    notifyProgress: s.notifyProgress !== false,
   };
 }
 
@@ -130,6 +118,17 @@ async function getConfig(key, make) {
   }
 }
 
+/** Багатодокументні транзакції є в replica set / Atlas; на окремому mongod працюємо з атомарними оновленнями. */
+async function supportsTransactions(database) {
+  if (process.env.MONGODB_TRANSACTIONS === 'off') return false;
+  try {
+    const hello = await database.admin().command({ hello: 1 });
+    return !!(hello.setName || hello.msg === 'isdbgrid');
+  } catch {
+    return false;
+  }
+}
+
 async function initDb() {
   const client = new MongoClient(MONGODB_URI, { serverSelectionTimeoutMS: 15000 });
   await client.connect();
@@ -150,6 +149,21 @@ async function initDb() {
   ratings = db.collection('navsrating'); // рейтинг студентів: один запис = студент у групі
   groupsCol = db.collection('navsrating_groups'); // навчальні групи (_id = назва)
 
+  ctx.client = client;
+  ctx.db = db;
+  Object.assign(ctx.col, {
+    users, pushSubs, sent, config, ratings, groups: groupsCol,
+    catalog: db.collection('rating_subjects'), // предмети рейтингу: повна назва, максимальний бал, порядок
+    history: db.collection('score_history'), // незмінна історія кожної зміни балу
+    conflicts: db.collection('score_conflicts'), // розбіжності між таблицею та балами, зміненими в застосунку
+    snapshots: db.collection('rating_snapshots'), // щоденні знімки для статистики
+    syncRuns: db.collection('sync_runs'), // журнал синхронізацій з Google Sheets
+    notifications: db.collection('notifications'), // сповіщення в застосунку
+    audit: db.collection('audit_log'), // журнал дій
+  });
+  ctx.settings = { defaultMaxScore: DEFAULT_MAX_SCORE, trustedDevicesOnly: TRUSTED_DEVICES_ONLY, digestHour: DIGEST_HOUR };
+  ctx.txn = await supportsTransactions(db);
+
   await users.createIndex({ nameKey: 1 }, { unique: true });
   await ratings.createIndex({ group: 1, nameKey: 1 }, { unique: true });
   await ratings.createIndex({ nameKey: 1 });
@@ -162,8 +176,29 @@ async function initDb() {
   await answers.createIndex({ at: 1 }, { expireAfterSeconds: 90 * 24 * 3600 });
   await noHw.createIndex({ at: 1 }, { expireAfterSeconds: 90 * 24 * 3600 });
   await sent.createIndex({ at: 1 }, { expireAfterSeconds: 3 * 24 * 3600 });
+  const c = ctx.col;
+  await Promise.all([
+    users.createIndex({ studentId: 1 }),
+    ratings.createIndex({ group: 1, active: 1 }),
+    c.history.createIndex({ studentId: 1, at: -1 }),
+    c.history.createIndex({ at: -1 }),
+    c.history.createIndex({ source: 1, at: -1 }),
+    c.history.createIndex({ requestId: 1 }, { unique: true, partialFilterExpression: { requestId: { $type: 'string' } } }),
+    c.conflicts.createIndex({ studentId: 1, subject: 1 }, { unique: true, partialFilterExpression: { status: 'open' } }),
+    c.conflicts.createIndex({ status: 1, detectedAt: -1 }),
+    c.snapshots.createIndex({ studentId: 1, date: -1 }),
+    c.snapshots.createIndex({ date: 1, group: 1 }),
+    c.syncRuns.createIndex({ startedAt: 1 }, { expireAfterSeconds: 180 * 24 * 3600 }),
+    c.notifications.createIndex({ userId: 1, createdAt: -1 }),
+    c.notifications.createIndex({ userId: 1, read: 1 }),
+    c.notifications.createIndex({ dedupeKey: 1 }, { unique: true, partialFilterExpression: { dedupeKey: { $type: 'string' } } }),
+    c.notifications.createIndex({ createdAt: 1 }, { expireAfterSeconds: 365 * 24 * 3600 }),
+    c.audit.createIndex({ at: -1 }),
+    c.audit.createIndex({ action: 1, at: -1 }),
+    c.audit.createIndex({ 'target.id': 1, at: -1 }),
+  ]);
 
-  await seedRating();
+  await migrate();
 
   SECRET = process.env.JWT_SECRET || (await getConfig('jwtSecret', () => crypto.randomBytes(32).toString('hex')));
 
@@ -217,7 +252,10 @@ setInterval(() => attempts.clear(), 60 * 60 * 1000).unref();
 const ROLES = { starosta: 'Староста', deputy: 'Заступник старости' };
 /** Адміністратор, староста або заступник старости: підтверджують домашнє й завантажують розклад. */
 const isMod = (u) => !!(u && (u.isAdmin || ROLES[u.role]));
-const pubUser = (u) => ({ id: u._id, fullName: u.fullName, isAdmin: !!u.isAdmin, role: ROLES[u.role] ? u.role : '', canModerate: isMod(u) });
+const pubUser = (u) => ({
+  id: u._id, fullName: u.fullName, isAdmin: !!u.isAdmin, role: ROLES[u.role] ? u.role : '', canModerate: isMod(u),
+  linked: !!u.studentId, studentName: u.studentName || '',
+});
 const pubLesson = (l) => ({
   id: l._id, pair: l.pair, start: l.start, end: l.end, subjectKey: l.subjectKey,
   kind: l.kind, topic: l.topic, room: l.room, teacher: l.teacher, isRemote: !!l.isRemote,
@@ -593,23 +631,57 @@ function normDevices(user) {
   return user;
 }
 
-async function addDevice(user, deviceId, label) {
+/**
+ * trusted=false — пристрій додано автоматично (вхід лише за ПІБ, у акаунта вже були інші пристрої).
+ * З такого пристрою можна користуватися щоденником, але не змінювати власні бали, доки адміністратор його не підтвердить.
+ */
+async function addDevice(user, deviceId, label, trusted = true) {
   normDevices(user);
   if (!user.deviceIds.includes(deviceId)) user.deviceIds.push(deviceId);
-  user.deviceMeta[devKey(deviceId)] = { label, addedAt: new Date() };
+  user.deviceMeta[devKey(deviceId)] = { label, addedAt: new Date(), trusted };
   user.pendingDevices = user.pendingDevices.filter((p) => p.deviceId !== deviceId);
   await users.updateOne({ _id: user._id }, {
     $set: { deviceIds: user.deviceIds, deviceMeta: user.deviceMeta, pendingDevices: user.pendingDevices },
   });
 }
 
+/** Довірений пристрій: перший, доданий паролем чи підтверджений адміністратором (старі записи без позначки — довірені). */
+function deviceTrusted(user, deviceId) {
+  if (!user || !deviceId) return false;
+  normDevices(user);
+  if (!user.deviceIds.includes(deviceId)) return false;
+  const meta = user.deviceMeta[devKey(deviceId)];
+  return !(meta && meta.trusted === false);
+}
+
 // ───────────────────────── Маршрути ─────────────────────────
 
 const routes = [];
+// Дії адміністраторів і модераторів у журналі (решта змінювальних адмін-маршрутів пишуть детальні записи самі).
+const AUDIT_ACTIONS = {
+  'PUT /api/schedule': 'schedule.upload',
+  'POST /api/lessons/:id/no-homework': 'lesson.no_homework',
+  'PUT /api/subjects': 'subject.update',
+  'PUT /api/teachers': 'teacher.update',
+  'POST /api/homework/:id/approve': 'homework.approve',
+  'POST /api/homework/:id/reject': 'homework.reject',
+  'POST /api/admin/notify': 'notify.send',
+  'POST /api/admin/grades/check': 'grades.check',
+  'POST /api/admin/users/:id/devices/:key/approve': 'device.approve',
+  'POST /api/admin/users/:id/devices/:key/reject': 'device.reject',
+  'POST /api/admin/users/:id/devices/:key/trust': 'device.trust',
+  'DELETE /api/admin/users/:id/devices/:key': 'device.remove',
+  'POST /api/admin/users/:id/reset-devices': 'devices.reset',
+  'POST /api/admin/users/:id/role': 'user.role',
+  'DELETE /api/admin/users/:id': 'user.delete',
+};
 function route(method, pattern, handler, opts = {}) {
   const keys = [];
   const re = new RegExp('^' + pattern.replace(/:([a-zA-Z]+)/g, (_, k) => { keys.push(k); return '([^/]+)'; }) + '$');
-  routes.push({ method, re, keys, handler, auth: opts.auth !== false, admin: !!opts.admin, mod: !!opts.mod });
+  const privileged = !!(opts.admin || opts.mod);
+  const auditAction = opts.audit === false || method === 'GET' ? null
+    : AUDIT_ACTIONS[`${method} ${pattern}`] || (privileged ? `api.${method.toLowerCase()}` : null);
+  routes.push({ method, pattern, re, keys, handler, auth: opts.auth !== false, admin: !!opts.admin, mod: !!opts.mod, auditAction });
 }
 
 const ok = () => ({});
@@ -634,7 +706,7 @@ route('POST', '/api/auth/login', async ({ body, ip, req }) => {
     const isAdmin = adminByName || (ADMIN_NAMES.size === 0 && (await users.countDocuments({})) === 0);
     user = {
       _id: crypto.randomUUID(), fullName, nameKey, isAdmin, deviceIds: [deviceId],
-      deviceMeta: { [devKey(deviceId)]: { label, addedAt: new Date() } }, pendingDevices: [], createdAt: new Date(),
+      deviceMeta: { [devKey(deviceId)]: { label, addedAt: new Date(), trusted: true } }, pendingDevices: [], createdAt: new Date(),
     };
     try {
       await users.insertOne(user);
@@ -659,11 +731,11 @@ route('POST', '/api/auth/login', async ({ body, ip, req }) => {
       } else if (user.isAdmin && ADMIN_PASSWORD && !body.password && !user.pendingDevices.some((p) => p.deviceId === deviceId)) {
         throw new HttpError(403, 'Для входу адміністратора з нового пристрою введіть пароль.', { code: 'password_required' });
       } else if (!user.isAdmin && !REQUIRE_DEVICE_APPROVAL) {
-        // Звичайний учасник: новий пристрій додається одразу, без запиту адміністратору.
+        // Звичайний учасник: новий пристрій додається одразу, без запиту адміністратору (але без права змінювати бали).
         if (deviceLimitReached(user)) {
           throw new HttpError(403, `До акаунта вже прив’язано максимум пристроїв (${MAX_DEVICES}). Попросіть адміністратора відв’язати непотрібний.`, { code: 'device_limit' });
         }
-        await addDevice(user, deviceId, label);
+        await addDevice(user, deviceId, label, false);
       } else {
         // Новий пристрій людини, яка вже має інші: не відмовляємо, а надсилаємо запит адміністратору.
         const already = user.pendingDevices.some((p) => p.deviceId === deviceId);
@@ -696,9 +768,9 @@ route('POST', '/api/auth/device-status', async ({ body, ip }) => {
 }, { auth: false });
 
 // — синхронізація
-route('GET', '/api/sync', async ({ user }) => {
+route('GET', '/api/sync', async ({ user, req }) => {
   const since = new Date(Date.now() - 60 * 24 * 3600 * 1000);
-  const [ls, subs, tchs, hws, title, reqUsers, noHws, myAnswers] = await Promise.all([
+  const [ls, subs, tchs, hws, title, reqUsers, noHws, myAnswers, unread, openConflicts] = await Promise.all([
     lessons.find({}).sort({ start: 1 }).toArray(),
     subjects.find({}).toArray(),
     teachers.find({}).toArray(),
@@ -707,6 +779,8 @@ route('GET', '/api/sync', async ({ user }) => {
     user.isAdmin ? users.find({ 'pendingDevices.0': { $exists: true } }).toArray() : [],
     noHw.find({}).toArray(),
     answers.find({ userId: user._id }).toArray(),
+    notify.unreadCount(user._id),
+    user.isAdmin ? ctx.col.conflicts.countDocuments({ status: 'open' }) : 0,
   ]);
   const subjectMap = {};
   for (const s of subs) subjectMap[s._id] = { fullName: s.fullName || '', link: s.link || '' };
@@ -719,6 +793,9 @@ route('GET', '/api/sync', async ({ user }) => {
     noHomework: noHws.map((x) => x._id),
     answered: myAnswers.map((x) => x.lessonId),
     deviceRequests: reqUsers.reduce((n, u) => n + u.pendingDevices.length, 0),
+    unread,
+    openConflicts,
+    deviceTrusted: deviceTrusted(user, req.deviceId),
     lessons: ls.map(pubLesson),
     subjects: subjectMap,
     teachers: teacherMap,
@@ -990,11 +1067,11 @@ route('GET', '/api/admin/users', async () => {
     normDevices(u);
     return {
       id: u._id, fullName: u.fullName, isAdmin: !!u.isAdmin, role: ROLES[u.role] ? u.role : '', group: u.group || '',
-      studentId: u.studentId || '', studentName: u.studentName || '',
+      studentId: u.studentId || '', studentName: u.studentName || '', lastSeenAt: u.lastSeenAt || null,
       devices: u.deviceIds.length, pushDevices: pushCount[u._id] || 0, createdAt: u.createdAt,
       deviceList: u.deviceIds.map((id, i) => {
         const m = u.deviceMeta[devKey(id)] || {};
-        return { key: devKey(id), label: m.label || `Пристрій ${i + 1}`, addedAt: m.addedAt || null, studentId: m.studentId || '', studentName: m.studentName || '' };
+        return { key: devKey(id), label: m.label || `Пристрій ${i + 1}`, addedAt: m.addedAt || null, trusted: m.trusted !== false };
       }),
       pending: u.pendingDevices.map((p) => ({ key: p.key || devKey(p.deviceId), label: p.label || 'Пристрій', requestedAt: p.requestedAt })),
     };
@@ -1022,443 +1099,6 @@ route('POST', '/api/admin/notify', async ({ body }) => {
   const sent = results.filter((r) => r.ok).length;
   if (!sent) throw new HttpError(502, 'Не вдалося доставити сповіщення: підписки застарілі. Користувачам треба ввімкнути їх знову.');
   return { sent, total: subs.length };
-}, { admin: true });
-
-// Список студентів для прив’язки до пристроїв.
-route('GET', '/api/admin/rating-students', async () => {
-  const rows = await ratings.find({}, { projection: { _id: 1, fullName: 1, group: 1 } }).sort({ fullName: 1 }).toArray();
-  return rows.map((r) => ({ id: r._id, fullName: r.fullName, group: r.group || '' }));
-}, { admin: true });
-
-// Прив’язка запису рейтингу до облікового запису людини, а не до пристрою.
-// Усі підтверджені пристрої цього облікового запису показують один і той самий рейтинг.
-route('POST', '/api/admin/users/:id/student', async ({ params, body }) => {
-  const account = await users.findOne({ _id: params.id });
-  if (!account) throw new HttpError(404, 'Користувача не знайдено.');
-  const studentId = str(body.studentId, 64);
-  if (!studentId) {
-    await users.updateOne(
-      { _id: account._id },
-      { $unset: { studentId: '', studentName: '' } }
-    );
-    return ok();
-  }
-  const student = await ratings.findOne({ _id: studentId });
-  if (!student) throw new HttpError(404, 'Студента не знайдено в рейтингу. Спочатку оновіть таблицю рейтингу.');
-  await users.updateOne(
-    { _id: account._id },
-    { $set: { studentId: student._id, studentName: student.fullName } }
-  );
-  return { ok: true, student: student.fullName };
-}, { admin: true });
-
-// ───────────────────────── Рейтинг ─────────────────────────
-// Ключ для зіставлення студента з обліковим записом: без дужок на кшталт «(староста)», єдиний апостроф.
-const ratingKey = (n) => normKey(String(n || '').replace(/\([^)]*\)/g, ' ').replace(/[`'ʼ‘’]/g, '’'));
-const cleanGroup = (v) => str(normName(v), 40);
-
-function cleanPoints(v) {
-  if (v === null || v === undefined || v === '') return null;
-  const n = typeof v === 'number' ? v : Number(String(v).replace(',', '.'));
-  if (!Number.isFinite(n) || n < 0 || n > 100000) throw new HttpError(400, 'Бали — число від 0 до 100000.');
-  return Math.round(n * 100) / 100;
-}
-
-function cleanSubjects(o) {
-  const out = {};
-  if (o && typeof o === 'object' && !Array.isArray(o)) {
-    for (const [k, v] of Object.entries(o).slice(0, 20)) {
-      const key = str(k, 20).replace(/[.$]/g, '');
-      const val = key ? cleanPoints(v) : null;
-      if (val !== null) out[key] = val;
-    }
-  }
-  return out;
-}
-
-// Місця: за спаданням балів; однакові бали — однакове місце (1, 2, 2, 4). Без балів — без місця, внизу.
-function rankEntries(list) {
-  const sorted = [...list].sort((a, b) => (b.points == null ? -1 : b.points) - (a.points == null ? -1 : a.points) || a.fullName.localeCompare(b.fullName, 'uk'));
-  let prev = null;
-  let rank = 0;
-  return sorted.map((e, i) => {
-    if (e.points == null) return { ...e, rank: null };
-    if (e.points !== prev) { rank = i + 1; prev = e.points; }
-    return { ...e, rank };
-  });
-}
-
-// Група студента: призначена адміністратором, інакше — з рейтингової таблиці за ПІБ.
-async function groupOf(user) {
-  if (user.group) return user.group;
-  const e = await ratings.findOne({ nameKey: ratingKey(user.fullName) });
-  return e ? e.group : '';
-}
-
-async function listGroups() {
-  const [named, rAgg, uAgg] = await Promise.all([
-    groupsCol.find({}).toArray(),
-    ratings.aggregate([{ $group: { _id: '$group', n: { $sum: 1 } } }]).toArray(),
-    users.aggregate([{ $match: { group: { $type: 'string', $ne: '' } } }, { $group: { _id: '$group', n: { $sum: 1 } } }]).toArray(),
-  ]);
-  const map = new Map();
-  const get = (name) => { if (!map.has(name)) map.set(name, { name, students: 0, accounts: 0 }); return map.get(name); };
-  named.forEach((g) => get(g._id));
-  rAgg.forEach((g) => { get(g._id).students = g.n; });
-  uAgg.forEach((g) => { get(g._id).accounts = g.n; });
-  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'uk'));
-}
-
-const ensureGroup = (name) => groupsCol.updateOne({ _id: name }, { $setOnInsert: { createdAt: new Date() } }, { upsert: true });
-
-// Одноразовий безпечний імпорт першої таблиці (seed/rating-101-spd.json). Не перезаписує вже наявні записи.
-async function seedRating() {
-  const KEY = 'ratingSeed101spd';
-  let seed;
-  try { seed = JSON.parse(fs.readFileSync(path.join(__dirname, 'seed', 'rating-101-spd.json'), 'utf8')); } catch (e) { return; }
-  // Порядок предметів для вибору в рейтингу (далі його задає завантажена адміністратором таблиця).
-  if (Array.isArray(seed.subjects) && seed.subjects.length) {
-    await config.updateOne({ _id: 'ratingSubjects' }, { $setOnInsert: { value: seed.subjects } }, { upsert: true });
-  }
-  if (await config.findOne({ _id: KEY })) return;
-  const now = new Date();
-  let added = 0;
-  for (const e of seed.entries || []) {
-    try {
-      await ratings.insertOne({
-        _id: crypto.randomUUID(), group: seed.group, fullName: e.fullName, nameKey: ratingKey(e.fullName),
-        points: e.points == null ? null : e.points, subjects: e.subjects || {}, note: e.note || '', createdAt: now, updatedAt: now, source: seed.source,
-      });
-      added++;
-    } catch (err) { if (!err || err.code !== 11000) throw err; }
-  }
-  await ensureGroup(seed.group);
-  await config.updateOne({ _id: KEY }, { $set: { value: { at: now, added } } }, { upsert: true });
-  console.log(`Рейтинг: імпортовано ${added} студентів групи «${seed.group}».`);
-}
-
-const DEFAULT_RATING_GROUP = '101 СПД';
-
-// Список предметів рейтингу: з останньої завантаженої таблиці, інакше — зі збережених балів.
-async function ratingSubjects() {
-  const c = await config.findOne({ _id: 'ratingSubjects' });
-  if (c && Array.isArray(c.value) && c.value.length) return c.value;
-  const out = [];
-  for (const r of await ratings.find({}, { projection: { subjects: 1 } }).toArray()) {
-    for (const k of Object.keys(r.subjects || {})) if (!out.includes(k)) out.push(k);
-  }
-  return out;
-}
-
-const sumPoints = (subj) => {
-  const v = Object.values(subj);
-  return v.length ? Math.round(v.reduce((a, b) => a + b, 0) * 100) / 100 : null;
-};
-
-let googleTokenCache = { token: '', expiresAt: 0 };
-
-function b64url(value) {
-  return Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)).toString('base64url');
-}
-
-async function googleSheetsAccessToken() {
-  if (!GOOGLE_SERVICE_ACCOUNT_JSON) {
-    throw new Error('Не налаштовано GOOGLE_SERVICE_ACCOUNT_JSON. Додайте ключ сервісного акаунта в секрети сервера; таблицю не потрібно робити публічною.');
-  }
-  if (googleTokenCache.token && googleTokenCache.expiresAt > Date.now() + 60000) return googleTokenCache.token;
-  let credentials;
-  try { credentials = JSON.parse(GOOGLE_SERVICE_ACCOUNT_JSON); }
-  catch { throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON має містити коректний JSON ключа сервісного акаунта.'); }
-  if (!credentials.client_email || !credentials.private_key) throw new Error('У ключі сервісного акаунта немає client_email або private_key.');
-  const now = Math.floor(Date.now() / 1000);
-  const header = b64url({ alg: 'RS256', typ: 'JWT' });
-  const claim = b64url({
-    iss: credentials.client_email,
-    scope: 'https://www.googleapis.com/auth/spreadsheets.readonly',
-    aud: credentials.token_uri || 'https://oauth2.googleapis.com/token',
-    iat: now,
-    exp: now + 3600,
-  });
-  const unsigned = `${header}.${claim}`;
-  const signature = crypto.sign('RSA-SHA256', Buffer.from(unsigned), credentials.private_key).toString('base64url');
-  const assertion = `${unsigned}.${signature}`;
-  const tokenResponse = await fetch(credentials.token_uri || 'https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }),
-    signal: AbortSignal.timeout(20000),
-  });
-  const tokenBody = await tokenResponse.json().catch(() => ({}));
-  if (!tokenResponse.ok || !tokenBody.access_token) throw new Error(`Google OAuth: ${tokenBody.error_description || tokenBody.error || `HTTP ${tokenResponse.status}`}`);
-  googleTokenCache = { token: tokenBody.access_token, expiresAt: Date.now() + (Number(tokenBody.expires_in) || 3600) * 1000 };
-  return googleTokenCache.token;
-}
-
-async function readGoogleSheetGrid() {
-  const token = await googleSheetsAccessToken();
-  const headers = { Authorization: `Bearer ${token}` };
-  const base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEET_ID)}`;
-  const metaResponse = await fetch(`${base}?fields=${encodeURIComponent('sheets.properties(sheetId,title)')}`, { headers, signal: AbortSignal.timeout(20000) });
-  const meta = await metaResponse.json().catch(() => ({}));
-  if (!metaResponse.ok) throw new Error(`Не вдалося прочитати Google-таблицю: ${meta.error && meta.error.message || `HTTP ${metaResponse.status}`}`);
-  const sheet = (meta.sheets || []).map((x) => x.properties || {}).find((x) => String(x.sheetId) === GOOGLE_SHEET_GID);
-  if (!sheet) throw new Error(`У таблиці немає аркуша з gid=${GOOGLE_SHEET_GID}. Перевірте GOOGLE_SHEET_GID.`);
-  const range = `'${String(sheet.title).replace(/'/g, "''")}'!A:Z`;
-  const valuesResponse = await fetch(`${base}/values/${encodeURIComponent(range)}?valueRenderOption=FORMATTED_VALUE`, { headers, signal: AbortSignal.timeout(20000) });
-  const data = await valuesResponse.json().catch(() => ({}));
-  if (!valuesResponse.ok) throw new Error(`Не вдалося завантажити значення аркуша: ${data.error && data.error.message || `HTTP ${valuesResponse.status}`}`);
-  return data.values || [];
-}
-
-function parseRatingGrid(grid) {
-  const clean = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
-  const nameHead = /(^|\s)(піб|прізвище)/i;
-  const skipHead = /^(№|n|#|разом|сума|всього|total|місце|рейтинг|середній)/i;
-  let headRow = -1, nameCol = -1;
-  for (let r = 0; r < Math.min(grid.length, 30) && headRow < 0; r++) {
-    for (let c = 0; c < (grid[r] || []).length; c++) {
-      if (nameHead.test(clean(grid[r][c]))) { headRow = r; nameCol = c; break; }
-    }
-  }
-  if (headRow < 0) throw new Error('У Google-таблиці не знайдено заголовок колонки «ПІБ» або «Прізвище».');
-  const subjects = [], cols = [];
-  const head = grid[headRow] || [];
-  for (let c = nameCol + 1; c < head.length; c++) {
-    const name = clean(head[c]).replace(/[.$]/g, '');
-    if (!name || skipHead.test(name) || subjects.includes(name)) continue;
-    subjects.push(name); cols.push(c);
-  }
-  if (!subjects.length) throw new Error('Праворуч від колонки ПІБ не знайдено предметів.');
-  const entries = [], seen = new Set();
-  for (let r = headRow + 1; r < grid.length; r++) {
-    let fullName = clean((grid[r] || [])[nameCol]);
-    if (!fullName) continue;
-    let note = '';
-    fullName = clean(fullName.replace(/\(([^)]*)\)/g, (_, value) => { note = note || clean(value); return ' '; }));
-    const key = ratingKey(fullName);
-    if (fullName.split(' ').length < 2 || seen.has(key)) continue;
-    seen.add(key);
-    const scores = {};
-    subjects.forEach((subject, i) => {
-      const raw = clean((grid[r] || [])[cols[i]]).replace(',', '.');
-      if (!raw) return;
-      const n = Number(raw);
-      if (Number.isFinite(n) && n >= 0 && n <= 100000) scores[subject] = Math.round(n * 100) / 100;
-    });
-    entries.push({ fullName, nameKey: key, note, subjects: scores, points: sumPoints(scores) });
-  }
-  if (!entries.length) throw new Error('У Google-таблиці не знайдено жодного студента.');
-  return { subjects, entries };
-}
-
-let googleRatingSyncBusy = false;
-async function syncGoogleSheetRating() {
-  if (!GOOGLE_SHEET_ID || googleRatingSyncBusy) return;
-  googleRatingSyncBusy = true;
-  const startedAt = new Date();
-  try {
-    const parsed = parseRatingGrid(await readGoogleSheetGrid());
-    const group = GOOGLE_SHEET_GROUP || DEFAULT_RATING_GROUP;
-    if (parsed.entries.length > 1000) throw new Error('У таблиці понад 1000 студентів — синхронізацію зупинено.');
-
-    const now = new Date();
-    const keys = parsed.entries.map((e) => e.nameKey);
-    await ratings.bulkWrite(parsed.entries.map((e) => ({
-      updateOne: {
-        filter: { group, nameKey: e.nameKey },
-        update: {
-          $set: { fullName: e.fullName, subjects: e.subjects, points: e.points, note: e.note, updatedAt: now, source: 'google-sheets' },
-          $setOnInsert: { _id: crypto.randomUUID(), createdAt: now },
-        },
-        upsert: true,
-      },
-    })), { ordered: false });
-    // Видаляємо лише після успішного завантаження й перевірки повного набору рядків.
-    await ratings.deleteMany({ group, nameKey: { $nin: keys } });
-    await ensureGroup(group);
-    await config.updateOne({ _id: 'ratingSubjects' }, { $set: { value: parsed.subjects } }, { upsert: true });
-    const state = { enabled: true, lastSuccessAt: now, lastAttemptAt: startedAt, lastError: '', students: parsed.entries.length, subjects: parsed.subjects.length, group, source: 'Google Sheets' };
-    await config.updateOne({ _id: 'googleRatingSync' }, { $set: { value: state } }, { upsert: true });
-    console.log(`Google Sheets: рейтинг оновлено — ${parsed.entries.length} студентів, ${parsed.subjects.length} предметів.`);
-    return state;
-  } catch (error) {
-    const previous = await config.findOne({ _id: 'googleRatingSync' }).catch(() => null);
-    const old = previous && previous.value ? previous.value : {};
-    const state = { ...old, enabled: true, lastAttemptAt: startedAt, lastError: String(error.message || error).slice(0, 500) };
-    await config.updateOne({ _id: 'googleRatingSync' }, { $set: { value: state } }, { upsert: true }).catch(() => {});
-    console.error('Google Sheets rating sync:', state.lastError);
-    return state;
-  } finally {
-    googleRatingSyncBusy = false;
-  }
-}
-
-route('POST', '/api/admin/rating/sync', async () => {
-  const state = await syncGoogleSheetRating();
-  if (!state || state.lastError) throw new HttpError(502, state && state.lastError || 'Синхронізація не виконана.');
-  return { ok: true, ...state };
-}, { admin: true });
-
-// Завантаження таблиці рейтингу (розібраної в браузері адміна): повністю оновлює рейтинг групи.
-// Студенти зіставляються за ПІБ: наявним оновлюються бали, нових додає, яких немає у файлі — видаляє.
-route('PUT', '/api/admin/rating/import', async ({ user, body }) => {
-  const subjList = [];
-  for (const raw of Array.isArray(body.subjects) ? body.subjects.slice(0, 20) : []) {
-    const k = str(raw, 20).replace(/[.$]/g, '').trim();
-    if (k && !subjList.includes(k)) subjList.push(k);
-  }
-  if (!subjList.length) throw new HttpError(400, 'У таблиці немає предметів.');
-  if (!Array.isArray(body.entries) || !body.entries.length) throw new HttpError(400, 'У таблиці немає студентів.');
-  if (body.entries.length > 1000) throw new HttpError(400, 'Забагато студентів у файлі.');
-
-  const group = cleanGroup(body.group) || (await groupOf(user)) || ((await listGroups())[0] || {}).name || DEFAULT_RATING_GROUP;
-  const byKey = new Map();
-  for (const raw of body.entries) {
-    const fullName = normName(raw && raw.fullName);
-    if (fullName.split(' ').length < 2 || fullName.length > 100) continue;
-    const nameKey = ratingKey(fullName);
-    if (byKey.has(nameKey)) continue;
-    const subjects = {};
-    for (const [k, v] of Object.entries(cleanSubjects(raw.subjects))) if (subjList.includes(k)) subjects[k] = v;
-    byKey.set(nameKey, { fullName, nameKey, subjects, points: sumPoints(subjects), note: str(raw.note, 60) });
-  }
-  if (!byKey.size) throw new HttpError(400, 'У таблиці не знайдено жодного коректного ПІБ.');
-
-  const now = new Date();
-  await ratings.deleteMany({ group, nameKey: { $nin: [...byKey.keys()] } });
-  await ratings.bulkWrite([...byKey.values()].map((e) => ({
-    updateOne: {
-      filter: { group, nameKey: e.nameKey },
-      update: {
-        $set: { fullName: e.fullName, subjects: e.subjects, points: e.points, note: e.note, updatedAt: now, source: 'import' },
-        $setOnInsert: { _id: crypto.randomUUID(), createdAt: now },
-      },
-      upsert: true,
-    },
-  })), { ordered: false });
-  await ensureGroup(group);
-  await config.updateOne({ _id: 'ratingSubjects' }, { $set: { value: subjList } }, { upsert: true });
-  return { ok: true, group, students: byKey.size, subjects: subjList.length };
-}, { admin: true });
-
-function readRatingBody(body, full) {
-  const set = {};
-  if (full || 'fullName' in body) {
-    const n = normName(body.fullName);
-    if (n.split(' ').length < 2 || n.length > 100) throw new HttpError(400, 'Введіть прізвище та ім’я (ПІБ).');
-    set.fullName = n;
-    set.nameKey = ratingKey(n);
-  }
-  if (full || 'group' in body) {
-    const g = cleanGroup(body.group);
-    if (!g) throw new HttpError(400, 'Оберіть групу.');
-    set.group = g;
-  }
-  if (full || 'points' in body) set.points = cleanPoints(body.points);
-  if ('subjects' in body) set.subjects = cleanSubjects(body.subjects);
-  if ('note' in body) set.note = str(body.note, 60);
-  set.updatedAt = new Date();
-  return set;
-}
-
-const dupRating = (e) => { if (e && e.code === 11000) throw new HttpError(409, 'Цей студент уже є в рейтингу цієї групи.'); throw e; };
-
-// Студент отримує ЛИШЕ свою групу (параметр group ігнорується). Адміністратор може дивитись будь-яку.
-// Розбивку за предметами бачить лише сам студент (у своєму рядку) та адміністратор.
-route('GET', '/api/rating', async ({ user, query, req }) => {
-  // Рейтинг прив’язаний тільки до облікового запису людини.
-  // Ідентифікатор пристрою використовується лише для авторизації, не для вибору студента.
-  const assignedId = user.studentId || '';
-  const assigned = assignedId ? await ratings.findOne({ _id: assignedId }) : null;
-  const own = assigned ? assigned.group : (await groupOf(user));
-  let group = own;
-  let groups = null;
-  if (user.isAdmin) {
-    groups = await listGroups();
-    group = cleanGroup(query.get('group')) || own || (groups[0] ? groups[0].name : '');
-  }
-  const subjects = await ratingSubjects();
-  const want = str(query.get('subject'), 20);
-  const subject = subjects.includes(want) ? want : ''; // '' — загальний рейтинг (сума балів)
-  if (!group || (!user.isAdmin && !assigned)) { const syncDoc = user.isAdmin ? await config.findOne({ _id: 'googleRatingSync' }) : null; return { group: '', own: '', groups, subjects, subject, entries: [], me: null, unassigned: !user.isAdmin && !assigned, ...(user.isAdmin ? { syncStatus: syncDoc && syncDoc.value || { enabled: !!GOOGLE_SHEET_ID } } : {}) }; }
-  const meKey = assigned ? assigned.nameKey : ratingKey(user.fullName);
-  const rows = await ratings.find({ group }).toArray();
-  const ranked = rankEntries(subject
-    ? rows.map((e) => ({ ...e, points: e.subjects && e.subjects[subject] != null ? e.subjects[subject] : null }))
-    : rows);
-  const entries = ranked.map((e) => {
-    const isMe = assigned ? String(e._id) === String(assigned._id) : e.nameKey === meKey;
-    return {
-      ...(user.isAdmin ? { id: e._id } : {}),
-      rank: e.rank, fullName: e.fullName, points: e.points, note: e.note || '', isMe,
-      ...(isMe || user.isAdmin ? { subjects: e.subjects || {} } : {}),
-    };
-  });
-  const me = entries.find((e) => e.isMe) || null;
-  const syncDoc = user.isAdmin ? await config.findOne({ _id: 'googleRatingSync' }) : null;
-  return { group, own, groups, subjects, subject, entries, total: entries.length, me: me && { rank: me.rank, points: me.points }, ...(user.isAdmin ? { syncStatus: syncDoc && syncDoc.value || { enabled: !!GOOGLE_SHEET_ID } } : {}) };
-});
-
-route('GET', '/api/admin/groups', async () => listGroups(), { admin: true });
-
-route('POST', '/api/admin/groups', async ({ body }) => {
-  const name = cleanGroup(body.name);
-  if (!name) throw new HttpError(400, 'Введіть назву групи.');
-  await ensureGroup(name);
-  return { name };
-}, { admin: true });
-
-route('PATCH', '/api/admin/groups', async ({ body }) => {
-  const from = cleanGroup(body.from);
-  const to = cleanGroup(body.to);
-  if (!from || !to) throw new HttpError(400, 'Вкажіть стару й нову назву групи.');
-  if (from === to) return ok();
-  try {
-    await ratings.updateMany({ group: from }, { $set: { group: to } });
-  } catch (e) { dupRating(e); }
-  await users.updateMany({ group: from }, { $set: { group: to } });
-  await groupsCol.deleteOne({ _id: from });
-  await ensureGroup(to);
-  return ok();
-}, { admin: true });
-
-route('DELETE', '/api/admin/groups/:name', async ({ params }) => {
-  const name = cleanGroup(params.name);
-  if ((await ratings.countDocuments({ group: name })) || (await users.countDocuments({ group: name }))) {
-    throw new HttpError(409, 'Група не порожня: спершу видаліть її студентів із рейтингу й зніміть групу в учасників.');
-  }
-  await groupsCol.deleteOne({ _id: name });
-  return ok();
-}, { admin: true });
-
-route('POST', '/api/admin/rating', async ({ body }) => {
-  const doc = { _id: crypto.randomUUID(), createdAt: new Date(), subjects: {}, note: '', ...readRatingBody(body, true) };
-  try { await ratings.insertOne(doc); } catch (e) { dupRating(e); }
-  await ensureGroup(doc.group);
-  return { id: doc._id };
-}, { admin: true });
-
-route('PATCH', '/api/admin/rating/:id', async ({ params, body }) => {
-  const set = readRatingBody(body, false);
-  let r;
-  try { r = await ratings.updateOne({ _id: params.id }, { $set: set }); } catch (e) { dupRating(e); }
-  if (!r.matchedCount) throw new HttpError(404, 'Запис не знайдено.');
-  if (set.group) await ensureGroup(set.group);
-  return ok();
-}, { admin: true });
-
-route('DELETE', '/api/admin/rating/:id', async ({ params }) => {
-  const r = await ratings.deleteOne({ _id: params.id });
-  if (!r.deletedCount) throw new HttpError(404, 'Запис не знайдено.');
-  return ok();
-}, { admin: true });
-
-route('POST', '/api/admin/users/:id/group', async ({ params, body }) => {
-  const g = cleanGroup(body.group);
-  const r = await users.updateOne({ _id: params.id }, g ? { $set: { group: g } } : { $unset: { group: '' } });
-  if (!r.matchedCount) throw new HttpError(404, 'Користувача не знайдено.');
-  if (g) await ensureGroup(g);
-  return ok();
 }, { admin: true });
 
 // — оцінки (адмін)
@@ -1492,6 +1132,17 @@ route('POST', '/api/admin/users/:id/devices/:key/reject', async ({ params }) => 
   const left = user.pendingDevices.filter((p) => (p.key || devKey(p.deviceId)) !== params.key);
   await users.updateOne({ _id: user._id }, { $set: { pendingDevices: left } });
   return ok();
+}, { admin: true });
+
+// Довіра до пристрою: лише з довіреного пристрою студент може підвищувати власні бали.
+route('POST', '/api/admin/users/:id/devices/:key/trust', async ({ params, body }) => {
+  const user = await users.findOne({ _id: params.id });
+  if (!user) throw new HttpError(404, 'Користувача не знайдено.');
+  normDevices(user);
+  if (!user.deviceIds.some((id) => devKey(id) === params.key)) throw new HttpError(404, 'Пристрій не знайдено.');
+  const trusted = !(body && body.trusted === false);
+  await users.updateOne({ _id: user._id }, { $set: { [`deviceMeta.${params.key}.trusted`]: trusted } });
+  return { trusted };
 }, { admin: true });
 
 route('DELETE', '/api/admin/users/:id/devices/:key', async ({ params }) => {
@@ -1582,6 +1233,16 @@ function readBody(req) {
   });
 }
 
+// Остання активність користувача (для статистики «активні студенти»): не частіше ніж раз на 10 хв.
+const seenAt = new Map();
+function touchLastSeen(user) {
+  const now = Date.now();
+  const last = Math.max(seenAt.get(user._id) || 0, user.lastSeenAt ? +new Date(user.lastSeenAt) : 0);
+  if (now - last < 10 * 60 * 1000) return;
+  seenAt.set(user._id, now);
+  users.updateOne({ _id: user._id }, { $set: { lastSeenAt: new Date(now) } }).catch(() => {});
+}
+
 async function handleApi(req, res, url) {
   try {
     const r = routes.find((x) => x.method === req.method && x.re.test(url.pathname));
@@ -1591,7 +1252,11 @@ async function handleApi(req, res, url) {
     }
     const m = r.re.exec(url.pathname);
     const params = {};
-    r.keys.forEach((k, i) => { params[k] = decodeURIComponent(m[i + 1]); });
+    try {
+      r.keys.forEach((k, i) => { params[k] = decodeURIComponent(m[i + 1]); });
+    } catch {
+      throw new HttpError(400, 'Некоректна адреса запиту.');
+    }
 
     let user = null;
     if (r.auth) {
@@ -1601,13 +1266,24 @@ async function handleApi(req, res, url) {
       if (!user || !data.d) throw new HttpError(401, 'Оновіть сеанс: увійдіть у застосунок знову.');
       const headerDevice = str(req.headers['x-device-id'], 100);
       if (data.d && headerDevice && data.d !== headerDevice) throw new HttpError(401, 'Сеанс не належить цьому пристрою. Увійдіть знову.');
-      req.deviceId = data.d || headerDevice;
+      // Пристрій, який адміністратор відв’язав, втрачає доступ одразу (раніше токен лишався дійсним рік).
+      normDevices(user);
+      if (!user.deviceIds.includes(data.d)) throw new HttpError(401, 'Цей пристрій відв’язано від акаунта. Увійдіть знову.');
+      req.deviceId = data.d;
+      req.deviceKey = devKey(data.d);
       if (r.admin && !user.isAdmin) throw new HttpError(403, 'Лише для адміністратора.');
       if (r.mod && !isMod(user)) throw new HttpError(403, 'Лише для адміністратора, старости чи заступника.');
+      touchLastSeen(user);
     }
     const body = req.method === 'GET' || req.method === 'DELETE' ? {} : await readBody(req);
     const ip = ((req.headers['x-forwarded-for'] || '').split(',')[0] || req.socket.remoteAddress || '').trim();
+    let target = null;
+    if (r.auditAction && params.id) {
+      const t = r.pattern.startsWith('/api/admin/users/') ? await users.findOne({ _id: params.id }, { projection: { fullName: 1 } }) : null;
+      target = { type: r.pattern.startsWith('/api/admin/users/') ? 'user' : 'item', id: params.id, name: t ? t.fullName : '' };
+    }
     const result = await r.handler({ req, params, query: url.searchParams, body, user, ip });
+    if (r.auditAction && user) audit(user, r.auditAction, { target, details: { ...summarize(body), ...(params.key ? { device: params.key.slice(0, 8) } : {}) }, ip });
     if (result && result.__raw) {
       res.writeHead(200, {
         'Content-Type': result.__raw.mime,
@@ -1661,6 +1337,44 @@ function serveStatic(req, res, url) {
   fs.createReadStream(file).pipe(res);
 }
 
+// ───────────────────────── Журнал успішності ─────────────────────────
+
+ratingRoutes.register(route);
+meRoutes.register(route, { deviceTrusted, rateLimit });
+adminRoutes.register(route);
+
+/**
+ * Щохвилини: щоденний знімок рейтингу (основа статистики) і о DIGEST_HOUR — підсумок дня
+ * (у неділю ще й тижня). claim() гарантує один запуск на день навіть після перезапуску.
+ */
+let progressBusy = false;
+async function progressTick() {
+  if (progressBusy || !ctx.col.snapshots) return;
+  progressBusy = true;
+  try {
+    const now = ctx.now();
+    const today = dayKey(now);
+    const once = async (key, fn) => {
+      if (!(await claim(key))) return;
+      try { await fn(); } catch (e) { await sent.deleteOne({ _id: key }).catch(() => {}); throw e; }
+    };
+    await once(`snapshot|${today}`, () => stats.snapshotAll(now));
+    if (localHour(now) >= DIGEST_HOUR) {
+      await once(`digest|${today}`, async () => {
+        const d = await notify.dailyDigest(now);
+        const w = weekdayOf(today) === 0 ? await notify.weeklyDigest(now) : { created: 0 };
+        console.log(`Підсумки успішності: щоденних сповіщень ${d.created}, тижневих ${w.created}.`);
+      });
+    }
+  } catch (e) {
+    console.error('progressTick:', e);
+  } finally {
+    progressBusy = false;
+  }
+}
+
+// ───────────────────────── HTTP-сервер ─────────────────────────
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/healthz') {
@@ -1673,30 +1387,50 @@ const server = http.createServer((req, res) => {
 
 // ───────────────────────── Запуск ─────────────────────────
 
-(async () => {
+const timers = [];
+
+/** Запускає сервер. Тести викликають start({ port: 0, schedulers: false }). */
+async function start({ port = PORT, schedulers = true } = {}) {
+  if (!MONGODB_URI) throw new Error('Не задано MONGODB_URI. Додайте змінну середовища з рядком підключення до MongoDB.');
   VAPID_PUBLIC = await initDb();
+  sync.configure(process.env);
+  ctx.sendPush = sendPush;
+  ctx.claim = claim;
   await ensureGradesBaseline().catch((e) => console.error('ensureGradesBaseline:', e));
-  if (GOOGLE_SHEET_ID) {
-    await syncGoogleSheetRating();
-    setInterval(syncGoogleSheetRating, GOOGLE_SHEET_INTERVAL_MS).unref();
-    console.log(`Google Sheets sync увімкнено: кожні ${Math.round(GOOGLE_SHEET_INTERVAL_MS / 60000)} хв.`);
+  await new Promise((resolve) => server.listen(port, resolve));
+  console.log(`Щоденник: сервер слухає порт ${server.address().port}${ctx.txn ? ' (транзакції MongoDB увімкнено)' : ''}`);
+  if (schedulers) {
+    sync.start();
+    timers.push(setInterval(tick, TICK_MS));
+    timers.push(setInterval(gradesTick, 60 * 1000));
+    timers.push(setInterval(progressTick, 60 * 1000));
+    gradesTick();
+    progressTick();
+    cleanOrphanImages();
+    timers.push(setInterval(cleanOrphanImages, 6 * 3600 * 1000));
+    // Безкоштовні хостинги «присипляють» сервіс без запитів — тоді сповіщення не відправляються.
+    // На Render сервіс сам себе «будить» раз на 10 хвилин (вимкнути: KEEP_ALIVE=0).
+    const self = process.env.RENDER_EXTERNAL_URL;
+    if (self && process.env.KEEP_ALIVE !== '0') {
+      timers.push(setInterval(() => { fetch(self + '/healthz').catch(() => {}); }, 10 * 60 * 1000));
+    }
   }
-  server.listen(PORT, () => console.log(`Щоденник: сервер слухає порт ${PORT}`));
-  setInterval(tick, TICK_MS);
-  setInterval(gradesTick, 60 * 1000);
-  gradesTick();
-  cleanOrphanImages();
-  setInterval(cleanOrphanImages, 6 * 3600 * 1000).unref();
+  return { server, port: server.address().port, ctx };
+}
 
-  // Безкоштовні хостинги «присипляють» сервіс без запитів — тоді сповіщення не відправляються.
-  // На Render сервіс сам себе «будить» раз на 10 хвилин (вимкнути: KEEP_ALIVE=0).
-  const self = process.env.RENDER_EXTERNAL_URL;
-  if (self && process.env.KEEP_ALIVE !== '0') {
-    setInterval(() => { fetch(self + '/healthz').catch(() => {}); }, 10 * 60 * 1000).unref();
-  }
-})().catch((e) => {
-  console.error('Не вдалося запустити сервер:', e);
-  process.exit(1);
-});
+async function stop() {
+  sync.stop();
+  timers.splice(0).forEach(clearInterval);
+  await new Promise((resolve) => server.close(() => resolve()));
+  if (ctx.client) await ctx.client.close();
+}
 
-process.on('SIGTERM', () => { server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref(); });
+if (require.main === module) {
+  start().catch((e) => {
+    console.error('Не вдалося запустити сервер:', e);
+    process.exit(1);
+  });
+  process.on('SIGTERM', () => { server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref(); });
+}
+
+module.exports = { start, stop, progressTick, ctx };
