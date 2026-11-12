@@ -22,7 +22,7 @@
     cf: { data: null, err: '', status: 'open', page: 1 },
     hist: { data: null, err: '', q: '', subject: '', source: '', group: '', from: '', to: '', studentId: '', studentName: '', page: 1 },
     aud: { data: null, err: '', q: '', action: '', role: '', from: '', to: '', page: 1 },
-    grp: { data: null, err: '', edit: '', msg: '', msgCls: 'muted' },
+    grp: { data: null, err: '', edit: '', msg: '', msgCls: 'muted', draft: '', renameDraft: '' },
   });
   const A = blank();
 
@@ -667,7 +667,7 @@
           <div class="card-sub">Студентів: <b>${g.students}</b>${g.archived ? ` · в архіві: <b>${g.archived}</b>` : ''} · облікових записів: <b>${g.accounts}</b></div></div>
         ${g.synced ? badge('Google-таблиця', 'sky') : ''}</div>
       ${editing ? `<div class="a-inline-form">
-          <input class="field" id="aGrpRename" maxlength="40" value="${name}" autocomplete="off" aria-label="Нова назва групи «${name}»">
+          <input class="field" id="aGrpRename" data-inp="aGrpRenameInp" maxlength="40" value="${esc(A.grp.renameDraft)}" autocomplete="off" aria-label="Нова назва групи «${name}»">
           <div class="btn-row"><button class="btn small auto" data-act="aGrpRenameSave" data-name="${name}">Зберегти</button>
             <button class="btn small ghost auto" data-act="aGrpRenameCancel">Скасувати</button></div></div>
         ${g.synced ? '<div class="muted small">Після перейменування синхронізація з Google-таблицею й далі оновлюватиме цю групу під новою назвою.</div>' : ''}` : ''}
@@ -683,7 +683,7 @@
   function viewGroups() {
     const G = A.grp;
     let h = `<div class="card"><div class="card-title">Нова група</div>
-      <div class="a-inline-form"><input class="field" id="aGrpNew" maxlength="40" placeholder="Наприклад: 102 СПД" autocomplete="off" aria-label="Назва нової групи">
+      <div class="a-inline-form"><input class="field" id="aGrpNew" data-inp="aGrpNewInp" maxlength="40" value="${esc(G.draft)}" placeholder="Наприклад: 102 СПД" autocomplete="off" aria-label="Назва нової групи">
         <button class="btn auto" data-act="aGrpAdd">${ic('plus', 18)} Додати групу</button></div>
       <div class="muted small">Від 2 до 40 символів: літери, цифри, пробіли та знаки - . / ( ) ’ №. Дві групи з однаковою назвою (незалежно від великих і малих літер) створити не можна.</div>
       ${G.msg ? `<div class="${G.msgCls} small" role="alert">${esc(G.msg)}</div>` : ''}</div>`;
@@ -1034,28 +1034,28 @@
         await D.withBusy(el, async () => {
           try {
             const r = await api('POST', '/api/admin/groups', { name });
-            A.grp.msg = '';
+            Object.assign(A.grp, { msg: '', draft: '' });
             toast(`Групу «${r.name}» створено`);
             await afterGroupChange();
           } catch (e) { grpMsg(e.message); }
         });
       },
       aGrpEdit(el) {
-        Object.assign(A.grp, { edit: el.dataset.name, msg: '' });
+        Object.assign(A.grp, { edit: el.dataset.name, renameDraft: el.dataset.name, msg: '' });
         render();
         const i = $('#aGrpRename');
         if (i) { i.focus(); i.select(); }
       },
-      aGrpRenameCancel() { A.grp.edit = ''; render(); },
+      aGrpRenameCancel() { Object.assign(A.grp, { edit: '', renameDraft: '' }); render(); },
       async aGrpRenameSave(el) {
         const from = el.dataset.name;
         const to = (($('#aGrpRename') || {}).value || '').trim();
         if (!to) { grpMsg('Введіть нову назву групи.'); return; }
-        if (to === from) { A.grp.edit = ''; render(); return; }
+        if (to === from) { Object.assign(A.grp, { edit: '', renameDraft: '' }); render(); return; }
         await D.withBusy(el, async () => {
           try {
             const r = await api('PATCH', '/api/admin/groups', { from, to });
-            Object.assign(A.grp, { edit: '', msg: '' });
+            Object.assign(A.grp, { edit: '', renameDraft: '', msg: '' });
             toast(r.synced ? `Групу перейменовано на «${r.name}». Google-таблиця й далі оновлює цю групу.` : `Групу перейменовано на «${r.name}»`);
             if (S.rating.group === from) S.rating.group = r.name;
             if (A.st.group === from) A.st.group = r.name;
@@ -1280,6 +1280,9 @@
       aStQ(el) { A.st.q = el.value; A.st.page = 1; debounce(loadStudents); },
       aHistQ(el) { A.hist.q = el.value; A.hist.page = 1; debounce(loadHistory); },
       aAudQ(el) { A.aud.q = el.value; A.aud.page = 1; debounce(loadAudit); },
+      // Чернетки назв: автооновлення сторінки (раз на 2 хв) не стирає вже введений текст.
+      aGrpNewInp(el) { A.grp.draft = el.value; },
+      aGrpRenameInp(el) { A.grp.renameDraft = el.value; },
     },
   });
 })();
