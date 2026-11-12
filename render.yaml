@@ -3,7 +3,7 @@ services:
     name: navsstudents
     runtime: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install --omit=dev
     startCommand: npm start
     healthCheckPath: /healthz
     envVars:
@@ -15,11 +15,13 @@ services:
         sync: false
       - key: GOOGLE_SHEET_ID
         value: 1grET3-MHCkBXqrBrHL1BIiUnAks0Kh3P4MuOijcPykY
+      # Аркуш «101_СПД_2026». Попереднє значення «0» не існувало в таблиці.
       - key: GOOGLE_SHEET_GID
-        value: "0"
+        value: "447170421"
       - key: GOOGLE_SHEET_GROUP
         value: 101 СПД
       - key: GOOGLE_SHEET_INTERVAL_MS
         value: "300000"
+      # Потрібен лише для приватної таблиці; таблиця, відкрита за посиланням, читається без ключа.
       - key: GOOGLE_SERVICE_ACCOUNT_JSON
         sync: false
