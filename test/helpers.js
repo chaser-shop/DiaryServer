@@ -13,11 +13,12 @@ async function setup({ replSet = true } = {}) {
   const mongo = replSet
     ? await MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: 'wiredTiger' } })
     : await MongoMemoryServer.create();
-  const sheet = { body: FIXTURE, status: 200, type: 'text/csv; charset=utf-8', hits: 0 };
+  const sheet = { body: FIXTURE, status: 200, type: 'text/csv; charset=utf-8', hits: 0, delay: 0 };
   const fixture = http.createServer((req, res) => {
     sheet.hits++;
-    res.writeHead(sheet.status, { 'Content-Type': sheet.type });
-    res.end(sheet.body);
+    const send = () => { res.writeHead(sheet.status, { 'Content-Type': sheet.type }); res.end(sheet.body); };
+    if (sheet.delay) setTimeout(send, sheet.delay);
+    else send();
   });
   await new Promise((r) => fixture.listen(0, '127.0.0.1', r));
   Object.assign(process.env, {

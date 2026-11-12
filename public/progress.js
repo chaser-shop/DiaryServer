@@ -1,6 +1,6 @@
 /*
- * Успішність студента: мої бали (підвищення балу), статистика й графіки, історія змін,
- * сповіщення, профіль і налаштування сповіщень. Усі дані — лише власні (сервер бере студента з сеансу).
+ * Успішність студента: мої бали (підвищення балу), рейтинг (у app.js), статистика й графіки, останні зміни балів
+ * у профілі, сповіщення й налаштування сповіщень. Усі дані — лише власні (сервер бере студента з сеансу).
  */
 (() => {
   'use strict';
@@ -11,10 +11,8 @@
 
   const P = {
     scores: null, scoresErr: '',
-    recent: null,
     stats: null, statsErr: '', statsLoading: false,
     range: D.LS.get('statsRange', '7d'), from: '', to: '', period: 'day',
-    hist: { items: null, next: null, subject: '', err: '', loading: false },
     ntf: { items: null, next: null, err: '', loading: false },
     profile: null, profileErr: '',
     prefs: null, prefsLoading: false,
@@ -33,32 +31,12 @@
     try { P.scores = await api('GET', '/api/me/scores'); P.scoresErr = ''; } catch (e) { P.scoresErr = e.message; }
     render();
   }
-  async function loadRecent() {
-    try { P.recent = (await api('GET', '/api/me/history?limit=6')).items; } catch (e) { P.recent = P.recent || []; }
-    render();
-  }
   async function loadStats() {
     P.statsLoading = true;
     render();
     const q = P.range === 'custom' ? `range=custom&from=${encodeURIComponent(P.from)}&to=${encodeURIComponent(P.to)}` : `range=${P.range}`;
     try { P.stats = await api('GET', '/api/me/stats?' + q); P.statsErr = ''; } catch (e) { P.statsErr = e.message; }
     P.statsLoading = false;
-    render();
-  }
-  async function loadHistory(more) {
-    const H = P.hist;
-    H.loading = true;
-    if (!more) render();
-    const qs = ['limit=30'];
-    if (H.subject) qs.push('subject=' + encodeURIComponent(H.subject));
-    if (more && H.next) qs.push('before=' + encodeURIComponent(H.next));
-    try {
-      const r = await api('GET', '/api/me/history?' + qs.join('&'));
-      H.items = more ? (H.items || []).concat(r.items) : r.items;
-      H.next = r.next;
-      H.err = '';
-    } catch (e) { H.err = e.message; }
-    H.loading = false;
     render();
   }
   async function loadNotifications(more) {
@@ -101,7 +79,7 @@
   /** Порівняння з минулим (доба / тиждень / місяць) — лише з реальних знімків історії. */
   function periodCard(title, k) {
     if (!k || !k.available) {
-      return `<div class="kpi"><div class="k-top"><span class="k-label">${esc(title)}</span></div><div class="k-val faint" style="font-size:20px">Немає даних</div>
+      return `<div class="kpi"><div class="k-top"><span class="k-label">${esc(title)}</span></div><div class="k-val k-txt faint">Немає даних</div>
         <div class="k-sub">${k && k.since ? `Історія збирається з ${esc(fmt.longDay(k.since))}` : 'Історія ще не накопичилась'}</div></div>`;
     }
     return `<div class="kpi"><div class="k-top"><span class="k-label">${esc(title)}</span>${ui.delta(k.delta)}</div>
@@ -109,28 +87,28 @@
       <div class="k-sub"><span>${esc(fmt.num(k.baseTotal))} → ${esc(fmt.num(k.total))}</span>${k.rankChange ? ui.delta(k.rankChange, { text: `${Math.abs(k.rankChange)} ${fmt.plural(Math.abs(k.rankChange), 'позиція', 'позиції', 'позицій')}` }) : ''}</div></div>`;
   }
 
+  // Хто змінив бал — з погляду студента (імена адміністраторів не показуються).
+  const CHANGED_BY = { student: 'змінено вами', admin: 'адміністратор', sheet: 'Google-таблиця', import: 'імпорт файлу', seed: 'початкові дані', migration: 'початкові дані' };
+
   function historyItem(h) {
     const subj = subjOf(h.subject);
-    const title = subj && subj.title !== h.subject ? `${h.subject} · ${subj.title}` : h.subject;
-    return `<div class="feed-item">${ui.srcIcon(h.source)}
-      <div class="feed-body"><span class="t">«${esc(title)}»</span>
-        <span class="d">${esc(D.fmt.dateTime(h.at))} · ${esc(h.source === 'student' ? 'Змінено вами' : h.actorName)}${h.reason ? ' · ' + esc(h.reason) : ''}</span>
-        <span class="d faint">Операція ${esc(String(h.opId || h.id).slice(0, 8))}${h.conflictId ? ' · розв’язання конфлікту' : ''}</span></div>
-      <div class="feed-side">${ui.change(h.oldValue, h.newValue)}${ui.delta(h.delta)}</div></div>`;
+    const title = h.subjectTitle && h.subjectTitle !== h.subject ? h.subjectTitle : subj ? subj.title : h.subject;
+    return ui.scoreChange({ ...h, subjectTitle: title }, {
+      source: esc(CHANGED_BY[h.source] || 'система') + (h.conflictId ? ' · розв’язання розбіжності з таблицею' : ''),
+    });
   }
 
   function subjectCard(x, edit) {
     const canRaise = edit && edit.allowed && (x.value == null || x.value < x.max);
     return `<div class="subj-card ${x.underReview ? 'review' : ''}">
       <div class="s-head"><div><div class="s-key">${esc(x.key)}</div>${x.title !== x.key ? `<div class="s-title">${esc(x.title)}</div>` : ''}</div>${srcBadge(x.source)}</div>
-      <div class="spread"><div class="s-val"><b>${esc(fmt.num(x.value))}</b><span>/ ${esc(fmt.num(x.max))}</span></div>${x.delta != null ? ui.delta(x.delta) : ''}</div>
+      <div class="spread"><div class="s-val"><b>${esc(fmt.num(x.value))}</b><span>/ ${esc(fmt.num(x.max))}</span></div>${x.changes ? ui.scoreDelta(x.previous, x.value) : ''}</div>
       ${ui.progress(x.value || 0, x.max)}
-      <div class="s-meta"><span>Попередній: <b>${x.changes ? esc(fmt.num(x.previous)) : '—'}</b></span><span>Зміна: <b>${esc(fmt.pct(x.pct))}</b></span><span>Місце: <b>${x.rank ? `${x.rank} з ${x.of}` : '—'}</b></span></div>
-      ${x.studentIncrease > 0 ? `<div class="muted xs">Ваше підвищення: +${esc(fmt.num(x.studentIncrease))} до значення з таблиці</div>` : ''}
+      <div class="s-meta"><span>Попередній: <b>${x.changes && x.previous != null ? esc(fmt.num(x.previous)) : '—'}</b></span><span>Зміна: <b>${esc(fmt.pct(x.pct))}</b></span><span>Місце: <b>${x.rank ? `${x.rank} з ${x.of}` : '—'}</b></span></div>
+      ${x.studentIncrease > 0 ? `<div class="muted xs">Ваше підвищення: +${esc(fmt.points(x.studentIncrease))} до значення з таблиці</div>` : ''}
       ${x.underReview ? `<div class="notice warn" style="font-size:13px;padding:9px 11px">${ic('alert', 16)}<div>Значення в Google-таблиці відрізняється — бал перевіряє адміністратор.</div></div>` : ''}
       <div class="s-actions">
         <button class="btn small" data-act="incOpen" data-key="${esc(x.key)}" ${canRaise ? '' : 'disabled'}>${ic('up', 16)} Підвищити</button>
-        <button class="btn small ghost" data-act="subjHistory" data-key="${esc(x.key)}">${ic('clock', 16)} Історія</button>
       </div></div>`;
   }
 
@@ -152,7 +130,7 @@
     if (!P.scores) return P.scoresErr ? ui.error(P.scoresErr, 'pReloadScores') : ui.skeleton(3, 120);
     if (!P.scores.linked) return notLinked();
     const s = P.scores;
-    if (!s.student.active) return summaryHero(s) + ui.notice('warn', 'Ваш запис у рейтингу архівовано (вас немає в актуальній Google-таблиці). Зверніться до адміністратора.');
+    if (!s.student.active) return summaryHero(s) + ui.notice('warn', 'Ваш запис у рейтингу групи архівовано. Якщо це помилка, зверніться до адміністратора.');
     return `${summaryHero(s)}
       ${editNotice(s.edit)}
       ${s.edit.allowed ? ui.notice('info', 'Ви можете підвищити бал з будь-якого предмета в межах максимуму. <b>Знизити бал після збереження неможливо</b>; кожна зміна записується в історію й видима адміністратору.') : ''}
@@ -220,8 +198,8 @@
       }).join('')}</div></div>`;
     const act = s.activity || [];
     h += `<div class="grid c2">
-      <div class="card"><div class="card-title">Найкращі предмети</div>${s.best.length ? `<div class="feed">${s.best.map((b, i) => `<div class="feed-item"><span class="feed-ic student">${i + 1}</span><div class="feed-body"><span class="t">${esc(b.key)}${b.title !== b.key ? ' · ' + esc(b.title) : ''}</span><span class="d">${esc(fmt.num(b.value))} з ${esc(fmt.num(b.max))}</span></div><div class="feed-side"><b>${esc(fmt.pct(Math.round((b.value / b.max) * 1000) / 10))}</b></div></div>`).join('')}</div>` : '<div class="muted small">Балів ще немає.</div>'}</div>
-      <div class="card"><div class="card-title">Найбільше покращення за період</div>${s.improved.length ? `<div class="feed">${s.improved.map((b) => `<div class="feed-item"><span class="feed-ic sheet">${ic('up', 16)}</span><div class="feed-body"><span class="t">${esc(b.key)}${b.title !== b.key ? ' · ' + esc(b.title) : ''}</span><span class="d">${b.pct != null ? esc(fmt.signed(b.pct, '%')) : 'нові бали'}${b.partial ? ` · з ${esc(fmt.longDay(b.fromDate))}` : ''}</span></div><div class="feed-side">${ui.delta(b.delta)}</div></div>`).join('')}</div>` : '<div class="muted small">За обраний період покращень не було.</div>'}</div>
+      <div class="card"><div class="card-title">Найкращі предмети</div>${s.best.length ? `<div class="feed">${s.best.map((b, i) => `<div class="feed-item"><span class="feed-ic fi-student">${i + 1}</span><div class="feed-body"><span class="t">${esc(b.key)}${b.title !== b.key ? ' · ' + esc(b.title) : ''}</span><span class="d">${esc(fmt.num(b.value))} з ${esc(fmt.num(b.max))}</span></div><div class="feed-side"><b>${esc(fmt.pct(Math.round((b.value / b.max) * 1000) / 10))}</b></div></div>`).join('')}</div>` : '<div class="muted small">Балів ще немає.</div>'}</div>
+      <div class="card"><div class="card-title">Найбільше покращення за період</div>${s.improved.length ? `<div class="feed">${s.improved.map((b) => `<div class="feed-item"><span class="feed-ic fi-sheet">${ic('up', 16)}</span><div class="feed-body"><span class="t">${esc(b.key)}${b.title !== b.key ? ' · ' + esc(b.title) : ''}</span><span class="d">${b.pct != null ? esc(fmt.signed(b.pct, '%')) : 'нові бали'}${b.partial ? ` · з ${esc(fmt.longDay(b.fromDate))}` : ''}</span></div><div class="feed-side">${ui.delta(b.delta)}</div></div>`).join('')}</div>` : '<div class="muted small">За обраний період покращень не було.</div>'}</div>
     </div>`;
     if (act.length) {
       h += `<div class="card"><div class="card-head"><div><div class="card-title">Активність</div><div class="card-sub">Кількість змін балів за днями та їх джерело</div></div>
@@ -240,25 +218,6 @@
       </tbody></table></div>
       <div class="foot">Різниця й відсоток — порівняно з попереднім значенням балу (до останньої зміни). Відсоток = (новий − попередній) / попередній × 100; від нульового балу відсоток не обчислюється.</div></div>`;
     return h;
-  }
-
-  function viewHistory() {
-    if (P.scores && !P.scores.linked) return notLinked();
-    const H = P.hist;
-    const subjects = (P.scores && P.scores.subjects) || [];
-    let h = `<div class="toolbar"><select class="field" data-chg="histSubject" aria-label="Предмет"><option value="">Усі предмети</option>${subjects.map((x) => `<option value="${esc(x.key)}" ${H.subject === x.key ? 'selected' : ''}>${esc(x.key)}${x.title !== x.key ? ' — ' + esc(x.title) : ''}</option>`).join('')}</select></div>`;
-    if (H.err) return h + ui.error(H.err, 'pReloadHistory');
-    if (!H.items) return h + ui.skeleton(4, 70);
-    if (!H.items.length) return h + ui.empty('clock', 'Змін ще не було', 'Тут з’являтиметься кожна зміна ваших балів: з Google-таблиці, ваші підвищення та виправлення адміністратора.');
-    const groups = [];
-    for (const it of H.items) {
-      const g = fmt.dayGroup(it.at);
-      if (!groups.length || groups[groups.length - 1].g !== g) groups.push({ g, items: [] });
-      groups[groups.length - 1].items.push(it);
-    }
-    h += groups.map((g) => `<div><div class="day-head">${esc(g.g)}</div><div class="card tight"><div class="feed">${g.items.map(historyItem).join('')}</div></div></div>`).join('');
-    if (H.next) h += `<button class="btn ghost auto" data-act="histMore" ${H.loading ? 'disabled' : ''}>${H.loading ? '<span class="spin"></span>' : 'Показати ще'}</button>`;
-    return h + '<div class="foot">Історію неможливо змінити чи видалити. Номер операції допомагає адміністратору знайти конкретну зміну.</div>';
   }
 
   function viewNotifications() {
@@ -311,13 +270,13 @@
         <div><span class="label">Місце в групі за 30 днів</span>${Charts.line({ labels: rankSeries.map((p) => fmt.shortDay(p.date)), tipLabels: rankSeries.map((p) => fmt.longDay(p.date)), series: [{ name: 'Місце', color: 'var(--c4)', values: rankSeries.map((p) => p.rank) }], invert: true, integer: true, height: 150, format: (v) => `${Math.round(v)}`, empty: 'Історія місць ще накопичується' })}</div></div>
     </div>`;
     h += `<div class="grid c2">
-      <div class="card"><div class="card-head"><div class="card-title">Останні зміни балів</div><button class="link" data-act="go" data-tab="progress" data-sub="history">Уся історія</button></div>
-        ${pr.recent.length ? `<div class="feed">${pr.recent.map(historyItem).join('')}</div>` : '<div class="muted small">Змін ще не було.</div>'}</div>
+      <div class="card"><div class="card-title">Останні зміни балів</div>
+        ${pr.recent.length ? `<div class="sc-list">${pr.recent.map(historyItem).join('')}</div>` : '<div class="muted small">Змін ще не було.</div>'}</div>
       <div class="home-col">
         <div class="card"><div class="card-head"><div class="card-title">Останні сповіщення</div><button class="link" data-act="go" data-tab="notifications">Усі</button></div>
           ${pr.notifications.length ? pr.notifications.map((n) => `<div class="feed-item"><span class="feed-ic">${ic('bell', 16)}</span><div class="feed-body"><span class="t">${esc(n.title)}</span><span class="d">${esc(n.body)}</span><span class="d faint">${esc(fmt.rel(n.createdAt))}</span></div></div>`).join('') : '<div class="muted small">Сповіщень ще немає.</div>'}</div>
         <div class="card"><div class="card-title">Оновлення з Google-таблиці</div>
-          ${pr.syncUpdates.length ? `<div class="feed">${pr.syncUpdates.map(historyItem).join('')}</div>` : '<div class="muted small">Таблиця ще не змінювала ваші бали.</div>'}</div>
+          ${pr.syncUpdates.length ? `<div class="sc-list">${pr.syncUpdates.map(historyItem).join('')}</div>` : '<div class="muted small">Таблиця ще не змінювала ваші бали.</div>'}</div>
       </div></div>`;
     return h;
   }
@@ -341,16 +300,14 @@
     </div>`;
   }
 
+  // Права колонка головної: усі предмети студента (без окремого блоку «Останні зміни»).
   function homeSide() {
     if (!linked()) return '';
     const s = P.scores;
-    const top = [...s.subjects].filter((x) => x.value != null).sort((a, b) => b.value / b.max - a.value / a.max).slice(0, 5);
-    let h = `<div class="card"><div class="card-head"><div class="card-title">Мої предмети</div><button class="link" data-act="go" data-tab="progress" data-sub="scores">Усі бали</button></div>
-      ${top.length ? `<div class="hbars">${top.map((x) => `<div class="hbar"><span class="hb-l" title="${esc(x.title)}">${esc(x.key)}</span>${ui.progress(x.value, x.max)}<span class="hb-v">${esc(fmt.num(x.value))}</span></div>`).join('')}</div>` : '<div class="muted small">Балів ще немає.</div>'}
+    const list = [...s.subjects].filter((x) => x.value != null).sort((a, b) => b.value / b.max - a.value / a.max);
+    return `<div class="card"><div class="card-head"><div class="card-title">Мої предмети</div><button class="link" data-act="go" data-tab="progress" data-sub="scores">Усі бали</button></div>
+      ${list.length ? `<div class="hbars">${list.map((x) => `<div class="hbar"><span class="hb-l" title="${esc(x.title)}">${esc(x.key)}</span>${ui.progress(x.value, x.max)}<span class="hb-v">${esc(fmt.num(x.value))}</span></div>`).join('')}</div>` : '<div class="muted small">Балів ще немає.</div>'}
       ${s.edit.allowed ? `<button class="btn soft" data-act="go" data-tab="progress" data-sub="scores">${ic('up', 17)} Підвищити бал</button>` : editNotice(s.edit)}</div>`;
-    h += `<div class="card"><div class="card-head"><div class="card-title">Останні зміни</div><button class="link" data-act="go" data-tab="progress" data-sub="history">Історія</button></div>
-      ${!P.recent ? ui.skeleton(2, 50) : P.recent.length ? `<div class="feed">${P.recent.slice(0, 5).map(historyItem).join('')}</div>` : '<div class="muted small">Змін ще не було.</div>'}</div>`;
-    return h;
   }
 
   function prefsSection() {
@@ -434,7 +391,6 @@
     pages: {
       'progress/scores': { render: viewScores, enter: () => { loadScores(); } },
       'progress/stats': { render: viewStats, enter: () => { if (!P.scores) loadScores(); loadStats(); } },
-      'progress/history': { render: viewHistory, enter: () => { if (!P.scores) loadScores(); loadHistory(false); } },
       notifications: { render: viewNotifications, enter: () => loadNotifications(false) },
       'settings/profile': { render: viewProfile, enter: () => loadProfile() },
     },
@@ -443,16 +399,18 @@
       sync: () => {
         if (!S.user) return;
         loadScores();
-        if (S.tab === 'today') loadRecent();
+        // Відкрита сторінка оновлюється разом із новими даними (наприклад, із Google-таблиці) — без ручного оновлення.
+        const k = D.currentPage().key;
+        if (k === 'progress/stats') loadStats();
+        else if (k === 'settings/profile') loadProfile();
       },
       reset: () => {
-        Object.assign(P, { scores: null, recent: null, stats: null, profile: null, prefs: null, hist: { items: null, next: null, subject: '', err: '', loading: false }, ntf: { items: null, next: null, err: '', loading: false } });
+        Object.assign(P, { scores: null, stats: null, profile: null, prefs: null, ntf: { items: null, next: null, err: '', loading: false } });
       },
     },
     actions: {
       pReloadScores: loadScores,
       pReloadStats: loadStats,
-      pReloadHistory: () => loadHistory(false),
       pReloadProfile: loadProfile,
       ntfReload: () => loadNotifications(false),
       incOpen(el) { openIncrease(el.dataset.key); },
@@ -479,15 +437,12 @@
             D.closeSheet();
             toast(`«${x.key}»: ${fmt.num(r.entry.oldValue)} → ${fmt.num(r.entry.newValue)}. Зміну збережено.`);
             await loadScores();
-            loadRecent();
-            if (P.hist.items) loadHistory(false);
           } catch (e) {
             $('[data-role="err"]', s.el).textContent = e.message;
             if (e.code === 'stale' || e.code === 'not_increase') { await loadScores(); D.rerender(s); $('[data-role="err"]', s.el).textContent = e.message; }
           }
         });
       },
-      subjHistory(el) { P.hist.subject = el.dataset.key; P.hist.items = null; D.go('progress', 'history'); },
       statsRange(el) {
         P.range = el.dataset.v;
         if (P.range === 'custom') {
@@ -507,7 +462,6 @@
         loadStats();
       },
       statsPeriod(el) { P.period = el.dataset.v; render(); },
-      histMore() { loadHistory(true); },
       ntfMore() { loadNotifications(true); },
       async ntfReadAll() {
         try { const r = await api('POST', '/api/me/notifications/read', { all: true }); S.unread = r.unread; (P.ntf.items || []).forEach((n) => { n.read = true; }); render(); } catch (e) { toast(e.message); }
@@ -525,7 +479,6 @@
       },
     },
     changes: {
-      histSubject(el) { P.hist.subject = el.value; loadHistory(false); },
       async prefToggle(el) {
         P.prefs = { ...P.prefs, [el.dataset.key]: el.checked };
         try { P.prefs = (await api('PUT', '/api/me/prefs', { prefs: P.prefs })).prefs; toast('Налаштування сповіщень збережено'); } catch (e) { toast(e.message); }

@@ -22,6 +22,7 @@
     cf: { data: null, err: '', status: 'open', page: 1 },
     hist: { data: null, err: '', q: '', subject: '', source: '', group: '', from: '', to: '', studentId: '', studentName: '', page: 1 },
     aud: { data: null, err: '', q: '', action: '', role: '', from: '', to: '', page: 1 },
+    grp: { data: null, err: '', edit: '', msg: '', msgCls: 'muted', draft: '', renameDraft: '', editMsg: '' },
   });
   const A = blank();
 
@@ -208,6 +209,7 @@
   const RELOAD = {
     'admin/overview': loadDash, 'admin/analytics': loadAnalytics, 'admin/students': loadStudents, 'admin/student': loadStudent,
     'admin/sync': loadSync, 'admin/conflicts': loadConflicts, 'admin/history': loadHistory, 'admin/audit': loadAudit,
+    'admin/groups': loadGroupsPage,
   };
 
   // ───────────── спільні блоки ─────────────
@@ -236,8 +238,8 @@
 
   function groupTable(list) {
     if (!list || !list.length) return '<div class="muted small">Груп ще немає.</div>';
-    return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Група</th><th class="r">Студентів</th><th class="r">Сер. загальний</th><th class="r">Сер. за предмет</th></tr></thead><tbody>
-      ${list.map((g) => `<tr><td class="name">${esc(g.group)}</td><td class="r">${g.students}</td><td class="r">${num(g.avgTotal)}</td><td class="r">${num(g.avgScore)}</td></tr>`).join('')}</tbody></table></div>`;
+    return `<div class="tbl-wrap stack"><table class="tbl stack"><thead><tr><th>Група</th><th class="r">Студентів</th><th class="r">Сер. загальний</th><th class="r">Сер. за предмет</th></tr></thead><tbody>
+      ${list.map((g) => `<tr><td class="head name">${esc(g.group)}</td><td class="r" data-label="Студентів">${g.students}</td><td class="r" data-label="Сер. загальний">${num(g.avgTotal)}</td><td class="r" data-label="Сер. за предмет">${num(g.avgScore)}</td></tr>`).join('')}</tbody></table></div>`;
   }
 
   function moverList(list, empty) {
@@ -247,11 +249,18 @@
       <div class="feed-side">${ui.delta(m.delta)}${m.pct != null ? `<span class="xs muted">${esc(fmt.signed(m.pct, '%'))}</span>` : ''}</div></div>`).join('')}</div>`;
   }
 
+  // Хто змінив бал: для студента — без повтору імені (запис і так його), для інших джерел — назва джерела.
+  function changedBy(x) {
+    const src = esc(SRC[x.source] || 'Інше');
+    return (x.source === 'admin' || x.source === 'import') && x.actorName ? `${src} · ${esc(x.actorName)}` : src;
+  }
+  const actorOf = (x) => (x.source === 'sheet' ? 'Синхронізація з таблицею' : x.source === 'seed' || x.source === 'migration' ? 'Система' : x.actorName || '—');
+
   function histItem(x, { student = false } = {}) {
-    return `<div class="feed-item">${ui.srcIcon(x.source)}<div class="feed-body"><span class="t">${student ? who(x.studentId, x.studentName) + ' · ' : ''}${esc(x.subject)}</span>
-        <span class="d">${esc(SRC[x.source] || 'Інше')}${x.actorName ? ' · ' + esc(x.actorName) : ''} · ${when(x.at)}</span>
-        ${x.reason ? `<span class="d">${esc(x.reason)}</span>` : ''}</div>
-      <div class="feed-side">${ui.change(x.oldValue, x.newValue)}${ui.delta(x.delta)}</div></div>`;
+    return ui.scoreChange(x, {
+      who: student ? `${who(x.studentId, x.studentName)}${x.group ? ` <span class="muted">· ${esc(x.group)}</span>` : ''}` : '',
+      source: changedBy(x),
+    });
   }
 
   function recentItem(r) {
@@ -393,8 +402,8 @@
       labels: si.map((x) => x.key), tipLabels: si.map((x) => subjLabel(x)), series: [{ name: 'Середня зміна', values: si.map((x) => x.avgDelta) }],
       signed: true, height: 220, empty: 'Немає даних для порівняння за цей період', label: 'Зміна середнього балу за предметами',
     });
-    const siTable = si.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Предмет</th><th class="r">Порівняно</th><th class="r">Сер. зміна</th><th class="r">Зросли</th><th class="r">Знизились</th></tr></thead><tbody>
-      ${si.map((x) => `<tr><td><span class="name">${esc(x.key)}</span>${x.title !== x.key ? `<span class="sub">${esc(x.title)}</span>` : ''}</td><td class="r">${x.students}</td><td class="r">${ui.delta(x.avgDelta)}</td><td class="r">${x.improved}</td><td class="r">${x.declined}</td></tr>`).join('')}
+    const siTable = si.length ? `<div class="tbl-wrap stack"><table class="tbl stack"><thead><tr><th>Предмет</th><th class="r">Порівняно</th><th class="r">Сер. зміна</th><th class="r">Зросли</th><th class="r">Знизились</th></tr></thead><tbody>
+      ${si.map((x) => `<tr><td class="head"><span class="name">${esc(x.key)}</span>${x.title !== x.key ? `<span class="sub">${esc(x.title)}</span>` : ''}</td><td class="r" data-label="Порівняно">${x.students}</td><td class="r" data-label="Сер. зміна">${ui.delta(x.avgDelta)}</td><td class="r" data-label="Зросли">${x.improved}</td><td class="r" data-label="Знизились">${x.declined}</td></tr>`).join('')}
       </tbody></table></div>` : '';
     h += `<div class="grid c2">${box('Прогрес за предметами', 'Середня зміна балу студента за період', siChart)}${box('Деталі за предметами', 'Скільки студентів покращили чи погіршили результат', siTable || '<div class="muted small">Немає даних для порівняння.</div>')}</div>`;
 
@@ -624,6 +633,95 @@
     loadStudent();
   }
 
+  // ───────────── групи ─────────────
+
+  async function loadGroupsPage() {
+    try {
+      const list = await latest('grp', '/api/admin/groups');
+      Object.assign(A.grp, { data: list, err: '' });
+      A.groups = list;
+    } catch (e) { if (e === STALE) return; A.grp.err = e.message; }
+    render();
+  }
+
+  const grpMsg = (text, cls = 'err') => { Object.assign(A.grp, { msg: text, msgCls: cls }); render(); };
+
+  /** Після зміни груп: свіжий список і перезавантаження сторінок, що від груп залежать. */
+  async function afterGroupChange() {
+    Object.assign(A, { dash: null, an: null });
+    A.st.data = null;
+    A.hist.data = null;
+    await loadGroupsPage();
+    const names = new Set((A.grp.data || []).map((g) => g.name));
+    if (A.st.group && !names.has(A.st.group)) A.st.group = '';
+    if (A.anGroup && !names.has(A.anGroup)) A.anGroup = '';
+    if (A.hist.group && !names.has(A.hist.group)) A.hist.group = '';
+    D.loadRating(S.rating.group && names.has(S.rating.group) ? S.rating.group : '', true);
+  }
+
+  function groupCard(g) {
+    const editing = A.grp.edit === g.name;
+    const name = esc(g.name);
+    return `<div class="card a-group">
+      <div class="a-group-head"><div class="grow"><div class="card-title a-group-name">${name}</div>
+          <div class="card-sub">Студентів: <b>${g.students}</b>${g.archived ? ` · в архіві: <b>${g.archived}</b>` : ''} · облікових записів: <b>${g.accounts}</b></div></div>
+        ${g.synced ? badge('Google-таблиця', 'sky') : ''}</div>
+      ${editing ? `<div class="a-inline-form">
+          <input class="field" id="aGrpRename" data-inp="aGrpRenameInp" maxlength="40" value="${esc(A.grp.renameDraft)}" autocomplete="off" aria-label="Нова назва групи «${name}»">
+          <div class="btn-row"><button class="btn small auto" data-act="aGrpRenameSave" data-name="${name}">Зберегти</button>
+            <button class="btn small ghost auto" data-act="aGrpRenameCancel">Скасувати</button></div></div>
+        ${A.grp.editMsg ? `<div class="err small" role="alert">${esc(A.grp.editMsg)}</div>` : ''}
+        ${g.synced ? '<div class="muted small">Після перейменування синхронізація з Google-таблицею й далі оновлюватиме цю групу під новою назвою.</div>' : ''}` : ''}
+      <div class="btn-row a-group-actions">
+        <button class="btn small ghost auto" data-act="aGrpStudents" data-name="${name}">${ic('users', 16)} Студенти</button>
+        ${editing ? '' : `<button class="btn small ghost auto" data-act="aGrpEdit" data-name="${name}">${ic('edit', 16)} Перейменувати</button>`}
+        ${g.synced ? '' : `<button class="btn small ghost auto a-danger" data-act="aGrpDel" data-name="${name}">${ic('trash', 16)} Видалити</button>`}
+      </div>
+      ${g.synced ? '<div class="muted xs">Цю групу заповнює Google-таблиця, тому видалити її не можна.</div>' : ''}
+    </div>`;
+  }
+
+  function viewGroups() {
+    const G = A.grp;
+    let h = `<div class="card"><div class="card-title">Нова група</div>
+      <div class="a-inline-form"><input class="field" id="aGrpNew" data-inp="aGrpNewInp" maxlength="40" value="${esc(G.draft)}" placeholder="Наприклад: 102 СПД" autocomplete="off" aria-label="Назва нової групи">
+        <button class="btn auto" data-act="aGrpAdd">${ic('plus', 18)} Додати групу</button></div>
+      <div class="muted small">Від 2 до 40 символів: літери, цифри, пробіли та знаки - . / ( ) ’ №. Дві групи з однаковою назвою (незалежно від великих і малих літер) створити не можна.</div>
+      ${G.msg ? `<div class="${G.msgCls} small" role="alert">${esc(G.msg)}</div>` : ''}</div>`;
+    if (G.err && !G.data) return h + ui.error(G.err, 'aReloadGrp');
+    if (!G.data) return h + ui.skeleton(3, 96);
+    if (!G.data.length) return h + ui.empty('layers', 'Груп ще немає', 'Створіть першу групу або запустіть синхронізацію з Google-таблицею.');
+    return `${h}<div class="sec-head"><h2>Усі групи</h2><span class="muted small">${esc(plural(G.data.length, 'група', 'групи', 'груп'))}</span></div>
+      <div class="grid c2">${G.data.map(groupCard).join('')}</div>
+      <div class="foot">Видалення групи ніколи не видаляє студентів: якщо в групі є студенти чи облікові записи, їх буде перенесено до іншої групи разом із балами, історією й статистикою.</div>`;
+  }
+
+  function openGroupDelete(name) {
+    const g = (A.grp.data || []).find((x) => x.name === name);
+    if (!g) return;
+    const others = (A.grp.data || []).filter((x) => x.name !== name);
+    const people = g.students + g.archived;
+    D.openSheet({
+      title: 'Видалення групи', auto: false, g,
+      render: () => {
+        if (!people && !g.accounts) {
+          return `<div class="form"><div>Видалити групу <b>«${esc(g.name)}»</b>? Студентів і облікових записів у ній немає.</div>
+            <div data-role="msg" class="small" hidden></div>
+            <button class="btn red" data-act="aGrpDelOk">${ic('trash', 18)} Видалити групу</button></div>`;
+        }
+        if (!others.length) {
+          return ui.notice('warn', `У групі «${esc(g.name)}» є студенти або облікові записи, а іншої групи, до якої їх можна перенести, немає. Спершу створіть таку групу.`);
+        }
+        return `<div class="form">
+          ${ui.notice('warn', `У групі <b>«${esc(g.name)}»</b>: ${esc(plural(people, 'студент', 'студенти', 'студентів'))}${g.archived ? ` (з них в архіві: ${g.archived})` : ''} і ${esc(plural(g.accounts, 'обліковий запис', 'облікові записи', 'облікових записів'))}.`)}
+          <div>Студентів і облікові записи <b>не буде видалено</b>: перед видаленням групи їх перенесуть до обраної групи разом із балами, історією змін, статистикою й прив’язками облікових записів.</div>
+          <label><span class="label">Перенести до групи</span><select class="field" name="moveTo">${others.map((x) => opt(x.name, `${x.name} · ${plural(x.students, 'студент', 'студенти', 'студентів')}`, '')).join('')}</select></label>
+          <div data-role="msg" class="small" hidden></div>
+          <button class="btn red" data-act="aGrpDelOk">${ic('trash', 18)} Перенести студентів і видалити групу</button></div>`;
+      },
+    });
+  }
+
   // ───────────── Google Sheets ─────────────
 
   function viewSync() {
@@ -646,7 +744,7 @@
       </div></div>
       ${hl.cls === 'red' && s.lastError ? ui.notice('err', esc(s.lastError)) : ''}
       <dl class="dl">
-        <dt>Група в журналі</dt><dd>${esc(cfg.group || '—')}</dd>
+        <dt>Група в журналі</dt><dd>${esc(cfg.group || '—')}${cfg.configuredGroup && cfg.configuredGroup !== cfg.group ? ` <span class="muted small">(перейменовано; у налаштуваннях сервера — «${esc(cfg.configuredGroup)}»)</span>` : ''}</dd>
         <dt>Аркуш</dt><dd>${s.gid || cfg.gid ? `gid ${esc(s.gid || cfg.gid)}` : 'перший аркуш таблиці'}</dd>
         <dt>Спосіб читання</dt><dd>${esc(s.methodTitle || '—')}${cfg.serviceAccount ? ' · сервісний акаунт налаштовано' : ''}</dd>
         <dt>Остання успішна</dt><dd>${s.lastSuccessAt ? esc(fmt.dateTime(s.lastSuccessAt)) : 'ще не було'}</dd>
@@ -704,7 +802,7 @@
     const st = x.stats || {};
     const rows = [['Рядків у таблиці', st.rows], ['Нових студентів', st.newStudents], ['Оновлено студентів', st.updatedStudents], ['Без змін', st.unchangedStudents],
       ['Повернуто з архіву', st.reactivated], ['Архівовано', st.archived], ['Змінено балів', st.changedScores], ['Конфліктів', st.conflicts],
-      ['Некоректних клітинок', st.invalidCells], ['Нових предметів', st.newSubjects]];
+      ['Некоректних клітинок', st.invalidCells], ['Нових предметів', st.newSubjects], ['Виправлено ПІБ', st.renamed]];
     D.openSheet({
       title: 'Синхронізація', auto: false,
       render: () => `<div class="form">
@@ -790,10 +888,10 @@
       ${d.items.map((x) => `<tr>
         <td class="nowrap" data-label="Час">${esc(fmt.dateTime(x.at))}</td>
         <td class="head"><span>${who(x.studentId, x.studentName)}<span class="sub">${esc(x.group || '')}</span></span></td>
-        <td data-label="Предмет"><b>${esc(x.subject)}</b></td>
-        <td class="r nowrap" data-label="Зміна"><span>${ui.change(x.oldValue, x.newValue)} ${ui.delta(x.delta)}</span></td>
+        <td data-label="Предмет"><span><b>${esc(x.subjectTitle || x.subject)}</b>${x.subjectTitle && x.subjectTitle !== x.subject ? `<span class="sub">${esc(x.subject)}</span>` : ''}</span></td>
+        <td class="r" data-label="Зміна"><span class="sc-cell">${ui.scoreValues(x.oldValue, x.newValue)}${ui.scoreDelta(x.oldValue, x.newValue)}</span></td>
         <td data-label="Джерело">${ui.src(x.source)}</td>
-        <td data-label="Хто"><span>${esc(x.actorName || '—')}${x.reason ? `<span class="sub">${esc(x.reason)}</span>` : ''}</span></td></tr>`).join('')}
+        <td data-label="Хто"><span>${esc(actorOf(x))}${x.reason ? `<span class="sub">${esc(x.reason)}</span>` : ''}</span></td></tr>`).join('')}
     </tbody></table></div>${ui.pager(d, 'aHistPage')}`;
     return h;
   }
@@ -806,6 +904,10 @@
     if (d.subject && ('from' in d || 'to' in d)) out.push(`${esc(d.subject)}: ${num(d.from)} → ${num(d.to)}`);
     else if (d.subject) out.push(esc(d.subject));
     if (a.action === 'system.migrate' && ('from' in d || 'to' in d)) out.push(`версія структури даних: ${num(d.from)} → ${num(d.to)}`);
+    if (a.action === 'group.rename' && d.from) out.push(`«${esc(d.from)}» → «${esc(d.to)}»${d.synced ? ' (група Google-таблиці)' : ''}`);
+    if (a.action === 'group.delete' && 'movedTo' in d) {
+      out.push(d.movedTo ? `студентів (${num((d.students || 0) + (d.archived || 0))}) і облікові записи (${num(d.accounts || 0)}) перенесено до «${esc(d.movedTo)}»` : 'порожня група');
+    }
     if (d.resolution) out.push(esc(RESOLUTION[d.resolution] || d.resolution) + (d.value != null ? ` (${num(d.value)})` : ''));
     if (d.reason) out.push('причина: ' + esc(d.reason));
     if (d.note) out.push('коментар: ' + esc(d.note));
@@ -912,6 +1014,7 @@
       'admin/student': { render: viewStudent, enter: () => loadStudent(), title: () => (A.stu.data ? A.stu.data.student.fullName : 'Студент') },
       'admin/sync': { render: viewSync, enter: () => loadSync() },
       'admin/conflicts': { render: viewConflicts, enter: () => loadConflicts() },
+      'admin/groups': { render: viewGroups, enter: () => { Object.assign(A.grp, { msg: '', editMsg: '' }); return loadGroupsPage(); } },
       'admin/history': { render: viewHistory, enter: () => { ensureMeta(); loadHistory(); } },
       'admin/audit': { render: viewAudit, enter: () => loadAudit() },
     },
@@ -923,7 +1026,65 @@
     },
     actions: {
       aReloadDash: loadDash, aReloadAn: loadAnalytics, aReloadSt: loadStudents, aReloadStu: loadStudent,
-      aReloadSync: loadSync, aReloadCf: loadConflicts, aReloadHist: loadHistory, aReloadAud: loadAudit,
+      aReloadSync: loadSync, aReloadCf: loadConflicts, aReloadHist: loadHistory, aReloadAud: loadAudit, aReloadGrp: loadGroupsPage,
+
+      async aGrpAdd(el) {
+        const inp = $('#aGrpNew');
+        const name = inp ? inp.value.trim() : '';
+        if (!name) { grpMsg('Введіть назву групи.'); return; }
+        await D.withBusy(el, async () => {
+          try {
+            const r = await api('POST', '/api/admin/groups', { name });
+            Object.assign(A.grp, { msg: '', draft: '' });
+            toast(`Групу «${r.name}» створено`);
+            await afterGroupChange();
+          } catch (e) { grpMsg(e.message); }
+        });
+      },
+      aGrpEdit(el) {
+        Object.assign(A.grp, { edit: el.dataset.name, renameDraft: el.dataset.name, msg: '', editMsg: '' });
+        render();
+        const i = $('#aGrpRename');
+        if (i) { i.focus(); i.select(); }
+      },
+      aGrpRenameCancel() { Object.assign(A.grp, { edit: '', renameDraft: '', editMsg: '' }); render(); },
+      async aGrpRenameSave(el) {
+        const from = el.dataset.name;
+        const to = (($('#aGrpRename') || {}).value || '').trim();
+        if (!to) { A.grp.editMsg = 'Введіть нову назву групи.'; render(); return; }
+        if (to === from) { Object.assign(A.grp, { edit: '', renameDraft: '', editMsg: '' }); render(); return; }
+        await D.withBusy(el, async () => {
+          try {
+            const r = await api('PATCH', '/api/admin/groups', { from, to });
+            Object.assign(A.grp, { edit: '', renameDraft: '', msg: '', editMsg: '' });
+            toast(r.synced ? `Групу перейменовано на «${r.name}». Google-таблиця й далі оновлює цю групу.` : `Групу перейменовано на «${r.name}»`);
+            if (S.rating.group === from) S.rating.group = r.name;
+            if (A.st.group === from) A.st.group = r.name;
+            await afterGroupChange();
+          } catch (e) { A.grp.editMsg = e.message; render(); }
+        });
+      },
+      aGrpDel(el) { openGroupDelete(el.dataset.name); },
+      async aGrpDelOk(el) {
+        const s = D.sheetOf(el);
+        const g = s.g;
+        const moveTo = field(s, 'moveTo');
+        if ((g.students || g.archived || g.accounts) && !moveTo) { say(s, 'Оберіть групу, до якої перенести студентів.'); return; }
+        await D.withBusy(el, async () => {
+          try {
+            const r = await api('DELETE', `/api/admin/groups/${enc(g.name)}${moveTo ? `?moveTo=${enc(moveTo)}` : ''}`);
+            D.closeSheet();
+            A.grp.msg = '';
+            toast(r.movedTo ? `Групу «${g.name}» видалено, студентів перенесено до «${r.movedTo}»` : `Групу «${g.name}» видалено`);
+            if (S.rating.group === g.name) S.rating.group = r.movedTo || '';
+            await afterGroupChange();
+          } catch (e) { say(s, e.message); }
+        });
+      },
+      aGrpStudents(el) {
+        Object.assign(A.st, { group: el.dataset.name, status: 'all', q: '', page: 1, data: null });
+        D.go('admin', 'students');
+      },
       aStudent(el) { openStudent(el.dataset.id); },
 
       aRange(el) {
@@ -1121,6 +1282,9 @@
       aStQ(el) { A.st.q = el.value; A.st.page = 1; debounce(loadStudents); },
       aHistQ(el) { A.hist.q = el.value; A.hist.page = 1; debounce(loadHistory); },
       aAudQ(el) { A.aud.q = el.value; A.aud.page = 1; debounce(loadAudit); },
+      // Чернетки назв: автооновлення сторінки (раз на 2 хв) не стирає вже введений текст.
+      aGrpNewInp(el) { A.grp.draft = el.value; },
+      aGrpRenameInp(el) { A.grp.renameDraft = el.value; },
     },
   });
 })();

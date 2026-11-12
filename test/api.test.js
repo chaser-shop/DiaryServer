@@ -411,3 +411,157 @@ test('subject catalog: title and maximum are editable and enforced', async () =>
   const r = await h.call(A, 'POST', '/api/me/scores/increase', { subject: 'Укр', value: 36 });
   assert.equal(r.data.code, 'over_max');
 });
+
+test('score history: a first value has no change amount, legacy entries are corrected, titles are included', async () => {
+  const id = ids[A_NAME];
+  assert.equal(await h.ctx.col.history.countDocuments({ oldValue: null, delta: { $ne: null } }), 0, 'stored without a fake «+N»');
+  await h.ctx.col.history.insertOne({
+    _id: 'legacy-first-value', at: new Date(), studentId: id, studentName: A_NAME, group: 'ТЕСТ-1', subject: 'Укр',
+    oldValue: null, newValue: 35, delta: 35, source: 'sheet', actorName: 'Google Sheets',
+  });
+  const r = await h.call(admin, 'GET', `/api/admin/score-history?studentId=${encodeURIComponent(id)}&limit=100`);
+  assert.equal(r.status, 200);
+  const legacy = r.data.items.find((x) => x.id === 'legacy-first-value');
+  assert.equal(legacy.delta, null);
+  assert.equal(legacy.subjectTitle, 'Українська мова');
+  for (const x of r.data.items) {
+    assert.equal(x.delta, typeof x.oldValue === 'number' && typeof x.newValue === 'number' ? util.round2(x.newValue - x.oldValue) : null);
+  }
+  const mine = (await h.call(A, 'GET', '/api/me/history?limit=100')).data.items;
+  assert.equal(mine.find((x) => x.id === 'legacy-first-value').delta, null);
+  const dash = (await h.call(admin, 'GET', '/api/admin/dashboard')).data;
+  assert.ok(dash.recent.filter((x) => x.kind === 'score').every((x) => 'subjectTitle' in x));
+  await h.ctx.col.history.deleteOne({ _id: 'legacy-first-value' });
+});
+
+test('groups: create, validate, prevent duplicates, rename and delete without losing students', async () => {
+  const groups = async () => (await h.call(admin, 'GET', '/api/admin/groups')).data;
+  assert.equal((await h.call(A, 'POST', '/api/admin/groups', { name: 'ТЕСТ-2' })).status, 403, 'administrators only');
+  assert.equal((await h.call(admin, 'POST', '/api/admin/groups', { name: '  ТЕСТ-2 ' })).status, 200);
+  let r = await h.call(admin, 'POST', '/api/admin/groups', { name: 'тест-2' });
+  assert.equal(r.status, 409);
+  assert.equal(r.data.code, 'group_exists');
+  for (const bad of ['', 'А', '<b>x</b>', 'Г'.repeat(41)]) {
+    assert.equal((await h.call(admin, 'POST', '/api/admin/groups', { name: bad })).status, 400, `«${bad}»`);
+  }
+  let list = await groups();
+  assert.equal(list.find((g) => g.name === 'ТЕСТ-1').synced, true);
+  assert.deepEqual(list.find((g) => g.name === 'ТЕСТ-2'), { name: 'ТЕСТ-2', students: 0, archived: 0, accounts: 0, synced: false });
+
+  assert.equal((await h.call(admin, 'PATCH', '/api/admin/groups', { from: 'ТЕСТ-2', to: 'тест-1' })).data.code, 'group_exists');
+  assert.equal((await h.call(admin, 'PATCH', '/api/admin/groups', { from: 'ТЕСТ-2', to: 'ТЕСТ-3' })).status, 200);
+  const created = await h.call(admin, 'POST', '/api/admin/rating', { fullName: 'Шевчук Олег Петрович', group: 'ТЕСТ-3', subjects: { СПОУ: 50 } });
+  assert.equal(created.status, 200, JSON.stringify(created.data));
+  const sid = created.data.id;
+  const historyBefore = await h.ctx.col.history.countDocuments({ studentId: sid });
+  const acc = await h.login('Шевчук Олег Петрович');
+  assert.equal((await h.call(admin, 'POST', `/api/admin/users/${acc.user.id}/group`, { group: 'ТЕСТ-3' })).status, 200);
+
+  r = await h.call(admin, 'DELETE', '/api/admin/groups/' + encodeURIComponent('ТЕСТ-3'));
+  assert.equal(r.status, 409);
+  assert.equal(r.data.code, 'group_not_empty');
+  assert.equal(r.data.students, 1);
+  assert.equal(r.data.accounts, 1);
+  // Moving into a group that already has a student with the same name is refused (no silent merge).
+  await h.call(admin, 'POST', '/api/admin/rating', { fullName: A_NAME, group: 'ТЕСТ-3' });
+  r = await h.call(admin, 'DELETE', `/api/admin/groups/${encodeURIComponent('ТЕСТ-3')}?moveTo=${encodeURIComponent('ТЕСТ-1')}`);
+  assert.equal(r.data.code, 'group_name_clash');
+  assert.deepEqual(r.data.names, [A_NAME]);
+  assert.equal((await h.call(admin, 'DELETE', '/api/admin/groups/' + encodeURIComponent('ТЕСТ-1'))).data.code, 'group_synced');
+
+  await h.call(admin, 'POST', '/api/admin/groups', { name: 'ТЕСТ-4' });
+  r = await h.call(admin, 'DELETE', `/api/admin/groups/${encodeURIComponent('ТЕСТ-3')}?moveTo=${encodeURIComponent('ТЕСТ-4')}`);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal((await doc(sid)).group, 'ТЕСТ-4', 'same record, new group');
+  assert.equal(await h.ctx.col.history.countDocuments({ studentId: sid }), historyBefore, 'history kept');
+  assert.equal((await h.ctx.col.users.findOne({ _id: acc.user.id })).group, 'ТЕСТ-4');
+  list = await groups();
+  assert.equal(list.some((g) => g.name === 'ТЕСТ-3'), false);
+  assert.equal(list.find((g) => g.name === 'ТЕСТ-4').students, 2);
+  assert.ok(await h.ctx.col.audit.findOne({ action: 'group.delete', 'details.movedTo': 'ТЕСТ-4' }));
+  assert.equal(await h.ctx.col.history.countDocuments({ studentId: sid, group: { $ne: 'ТЕСТ-4' } }), 0, 'history follows the group');
+
+  // Renaming the synchronised group while a run is downloading the sheet: the rename waits for the run
+  // (which would otherwise find the old group empty and re-create everyone); the sheet keeps filling it.
+  const inSync = await h.ctx.col.ratings.countDocuments({ group: 'ТЕСТ-1' });
+  h.sheet.delay = 400;
+  const hits = h.sheet.hits;
+  const overlapping = sync();
+  while (h.sheet.hits === hits) await new Promise((resolve) => setTimeout(resolve, 10));
+  r = await h.call(admin, 'PATCH', '/api/admin/groups', { from: 'ТЕСТ-1', to: 'ТЕСТ-1А' });
+  h.sheet.delay = 0;
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.synced, true);
+  const o = await overlapping;
+  assert.equal(o.status, 200, JSON.stringify(o.data));
+  assert.equal(o.data.run.stats.newStudents, 0);
+  assert.equal(await h.ctx.col.history.countDocuments({ group: 'ТЕСТ-1' }), 0, 'history follows the rename');
+  const run = (await sync()).data.run;
+  assert.equal(run.status, 'unchanged');
+  assert.equal(run.stats.newStudents, 0);
+  assert.equal(await h.ctx.col.ratings.countDocuments({ group: 'ТЕСТ-1А' }), inSync);
+  assert.equal(await h.ctx.col.ratings.countDocuments({ group: 'ТЕСТ-1' }), 0);
+  assert.equal((await h.call(admin, 'GET', '/api/admin/sync')).data.settings.group, 'ТЕСТ-1А');
+  assert.equal((await h.call(admin, 'PATCH', '/api/admin/groups', { from: 'ТЕСТ-1А', to: 'ТЕСТ-1' })).status, 200);
+  assert.equal((await groups()).find((g) => g.name === 'ТЕСТ-1').synced, true);
+});
+
+test('sync: a corrected name keeps the record, a different person does not, an administrator archive is kept', async () => {
+  const full = h.sheet.body;
+  const ev = ids['Євтушенко Єва Євгенівна'];
+  const before = await doc(ev);
+  h.sheet.body = full.replace('Євтушенко Єва Євгенівна', 'Євтушенко Єва Євгеніївна');
+  let run = (await sync()).data.run;
+  assert.equal(run.stats.renamed, 1);
+  assert.equal(run.stats.newStudents, 0);
+  assert.equal(run.stats.archived, 0);
+  const d = await doc(ev);
+  assert.equal(d.fullName, 'Євтушенко Єва Євгеніївна');
+  assert.equal(d.active, true);
+  assert.deepEqual(d.subjects, before.subjects);
+  assert.ok(run.warnings.some((w) => w.startsWith('ПІБ виправлено')));
+  h.sheet.body = full;
+  run = (await sync()).data.run;
+  assert.equal(run.stats.renamed, 1);
+  assert.equal((await doc(ev)).fullName, 'Євтушенко Єва Євгенівна');
+
+  // Another person in the same row is a new student; the old one is archived, never merged.
+  h.sheet.body = full.replace('Євтушенко Єва Євгенівна', 'Ковальчук Марина Олегівна');
+  run = (await sync()).data.run;
+  assert.equal(run.stats.renamed, 0);
+  assert.equal(run.stats.newStudents, 1);
+  assert.equal(run.stats.archived, 1);
+  h.sheet.body = full;
+  run = (await sync()).data.run;
+  assert.equal(run.stats.reactivated, 1);
+  assert.equal((await doc(ev)).active, true);
+
+  // An administrator's archive is not undone by the next run, even though the student is in the sheet.
+  const g = ids['Гончаренко Галина Григорівна'];
+  assert.equal((await h.call(admin, 'POST', `/api/admin/students/${g}/archive`, { archived: true, reason: 'Академвідпустка' })).status, 200);
+  run = (await sync()).data.run;
+  assert.equal((await doc(g)).active, false);
+  assert.ok(run.warnings.some((w) => w.includes('архівований адміністратором')));
+  // A corrected name for an archived student renames the archived record; it is not restored as a new one.
+  h.sheet.body = full.replace('Гончаренко Галина Григорівна', 'Гончаренко Галина Григоріївна');
+  run = (await sync()).data.run;
+  assert.equal(run.stats.renamed, 1);
+  assert.equal(run.stats.newStudents, 0);
+  assert.equal((await doc(g)).fullName, 'Гончаренко Галина Григоріївна');
+  assert.equal((await doc(g)).active, false);
+  assert.equal(await h.ctx.col.ratings.countDocuments({ nameKey: util.ratingKey('Гончаренко Галина Григоріївна') }), 1);
+  h.sheet.body = full;
+  run = (await sync()).data.run;
+  assert.equal((await doc(g)).fullName, 'Гончаренко Галина Григорівна');
+  assert.equal((await doc(g)).active, false);
+  assert.equal((await h.call(admin, 'POST', `/api/admin/students/${g}/archive`, { archived: false })).status, 200);
+  assert.equal((await doc(g)).active, true);
+
+  // A student deleted in the app while still in the sheet comes back on the next run (the sheet is unchanged).
+  assert.equal((await h.call(admin, 'DELETE', `/api/admin/rating/${ids['Жук Жанна Жорівна']}`)).status, 200);
+  run = (await sync()).data.run;
+  assert.equal(run.status, 'success');
+  assert.equal(run.stats.newStudents, 1);
+  assert.ok(await h.ctx.col.ratings.findOne({ group: 'ТЕСТ-1', nameKey: util.ratingKey('Жук Жанна Жорівна'), active: { $ne: false } }));
+  assert.equal((await sync()).data.run.status, 'unchanged');
+});

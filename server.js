@@ -795,6 +795,7 @@ route('GET', '/api/sync', async ({ user, req }) => {
     deviceRequests: reqUsers.reduce((n, u) => n + u.pendingDevices.length, 0),
     unread,
     openConflicts,
+    sheetPending: sync.pending(),
     deviceTrusted: deviceTrusted(user, req.deviceId),
     lessons: ls.map(pubLesson),
     subjects: subjectMap,
