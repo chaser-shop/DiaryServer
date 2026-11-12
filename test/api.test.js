@@ -479,11 +479,23 @@ test('groups: create, validate, prevent duplicates, rename and delete without lo
   assert.equal(list.some((g) => g.name === 'ТЕСТ-3'), false);
   assert.equal(list.find((g) => g.name === 'ТЕСТ-4').students, 2);
   assert.ok(await h.ctx.col.audit.findOne({ action: 'group.delete', 'details.movedTo': 'ТЕСТ-4' }));
+  assert.equal(await h.ctx.col.history.countDocuments({ studentId: sid, group: { $ne: 'ТЕСТ-4' } }), 0, 'history follows the group');
 
-  // Renaming the synchronised group: the sheet keeps filling it, no duplicates appear.
+  // Renaming the synchronised group while a run is downloading the sheet: the rename waits for the run
+  // (which would otherwise find the old group empty and re-create everyone); the sheet keeps filling it.
   const inSync = await h.ctx.col.ratings.countDocuments({ group: 'ТЕСТ-1' });
+  h.sheet.delay = 400;
+  const hits = h.sheet.hits;
+  const overlapping = sync();
+  while (h.sheet.hits === hits) await new Promise((resolve) => setTimeout(resolve, 10));
   r = await h.call(admin, 'PATCH', '/api/admin/groups', { from: 'ТЕСТ-1', to: 'ТЕСТ-1А' });
+  h.sheet.delay = 0;
+  assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.synced, true);
+  const o = await overlapping;
+  assert.equal(o.status, 200, JSON.stringify(o.data));
+  assert.equal(o.data.run.stats.newStudents, 0);
+  assert.equal(await h.ctx.col.history.countDocuments({ group: 'ТЕСТ-1' }), 0, 'history follows the rename');
   const run = (await sync()).data.run;
   assert.equal(run.status, 'unchanged');
   assert.equal(run.stats.newStudents, 0);
@@ -530,6 +542,18 @@ test('sync: a corrected name keeps the record, a different person does not, an a
   run = (await sync()).data.run;
   assert.equal((await doc(g)).active, false);
   assert.ok(run.warnings.some((w) => w.includes('архівований адміністратором')));
+  // A corrected name for an archived student renames the archived record; it is not restored as a new one.
+  h.sheet.body = full.replace('Гончаренко Галина Григорівна', 'Гончаренко Галина Григоріївна');
+  run = (await sync()).data.run;
+  assert.equal(run.stats.renamed, 1);
+  assert.equal(run.stats.newStudents, 0);
+  assert.equal((await doc(g)).fullName, 'Гончаренко Галина Григоріївна');
+  assert.equal((await doc(g)).active, false);
+  assert.equal(await h.ctx.col.ratings.countDocuments({ nameKey: util.ratingKey('Гончаренко Галина Григоріївна') }), 1);
+  h.sheet.body = full;
+  run = (await sync()).data.run;
+  assert.equal((await doc(g)).fullName, 'Гончаренко Галина Григорівна');
+  assert.equal((await doc(g)).active, false);
   assert.equal((await h.call(admin, 'POST', `/api/admin/students/${g}/archive`, { archived: false })).status, 200);
   assert.equal((await doc(g)).active, true);
 

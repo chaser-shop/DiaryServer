@@ -535,7 +535,7 @@
     scoreDelta(oldV, newV) {
       const has = (v) => typeof v === 'number' && Number.isFinite(v);
       if (!has(oldV) && has(newV)) return '<span class="sc-delta new">новий бал</span>';
-      if (has(oldV) && !has(newV)) return '<span class="sc-delta down">бал прибрано</span>';
+      if (has(oldV) && !has(newV)) return '<span class="sc-delta down">бал видалено</span>';
       if (!has(oldV)) return '';
       const d = Math.round((newV - oldV) * 100) / 100;
       if (!d) return '<span class="sc-delta flat">без змін</span>';
@@ -973,7 +973,7 @@
         ? `Не вдалося оновити дані з Google-таблиці${sh.error ? `: ${esc(sh.error)}` : ''}. Показано останні збережені бали${asOf}. <button class="link" data-act="go" data-tab="admin" data-sub="sync">Деталі синхронізації</button>`
         : `Не вдалося отримати свіжі дані з Google-таблиці. Показано останні збережені бали${asOf}.`);
     }
-    if (d.archived) h += ui.notice('warn', 'Ваш запис у рейтингу архівовано (вас немає в актуальній Google-таблиці). Зверніться до адміністратора, якщо це помилка.');
+    if (d.archived) h += ui.notice('warn', 'Ваш запис у рейтингу групи архівовано. Якщо це помилка, зверніться до адміністратора.');
     if (me) {
       h += `<div class="card hero"><span class="label">Ваше місце · ${esc(d.group)}${d.subject ? ' · ' + esc(ratingTitle(d.subject)) : ''}</span>
         <div class="hero-main">

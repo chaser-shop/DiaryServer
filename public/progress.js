@@ -130,7 +130,7 @@
     if (!P.scores) return P.scoresErr ? ui.error(P.scoresErr, 'pReloadScores') : ui.skeleton(3, 120);
     if (!P.scores.linked) return notLinked();
     const s = P.scores;
-    if (!s.student.active) return summaryHero(s) + ui.notice('warn', 'Ваш запис у рейтингу архівовано (вас немає в актуальній Google-таблиці). Зверніться до адміністратора.');
+    if (!s.student.active) return summaryHero(s) + ui.notice('warn', 'Ваш запис у рейтингу групи архівовано. Якщо це помилка, зверніться до адміністратора.');
     return `${summaryHero(s)}
       ${editNotice(s.edit)}
       ${s.edit.allowed ? ui.notice('info', 'Ви можете підвищити бал з будь-якого предмета в межах максимуму. <b>Знизити бал після збереження неможливо</b>; кожна зміна записується в історію й видима адміністратору.') : ''}
@@ -198,8 +198,8 @@
       }).join('')}</div></div>`;
     const act = s.activity || [];
     h += `<div class="grid c2">
-      <div class="card"><div class="card-title">Найкращі предмети</div>${s.best.length ? `<div class="feed">${s.best.map((b, i) => `<div class="feed-item"><span class="feed-ic student">${i + 1}</span><div class="feed-body"><span class="t">${esc(b.key)}${b.title !== b.key ? ' · ' + esc(b.title) : ''}</span><span class="d">${esc(fmt.num(b.value))} з ${esc(fmt.num(b.max))}</span></div><div class="feed-side"><b>${esc(fmt.pct(Math.round((b.value / b.max) * 1000) / 10))}</b></div></div>`).join('')}</div>` : '<div class="muted small">Балів ще немає.</div>'}</div>
-      <div class="card"><div class="card-title">Найбільше покращення за період</div>${s.improved.length ? `<div class="feed">${s.improved.map((b) => `<div class="feed-item"><span class="feed-ic sheet">${ic('up', 16)}</span><div class="feed-body"><span class="t">${esc(b.key)}${b.title !== b.key ? ' · ' + esc(b.title) : ''}</span><span class="d">${b.pct != null ? esc(fmt.signed(b.pct, '%')) : 'нові бали'}${b.partial ? ` · з ${esc(fmt.longDay(b.fromDate))}` : ''}</span></div><div class="feed-side">${ui.delta(b.delta)}</div></div>`).join('')}</div>` : '<div class="muted small">За обраний період покращень не було.</div>'}</div>
+      <div class="card"><div class="card-title">Найкращі предмети</div>${s.best.length ? `<div class="feed">${s.best.map((b, i) => `<div class="feed-item"><span class="feed-ic fi-student">${i + 1}</span><div class="feed-body"><span class="t">${esc(b.key)}${b.title !== b.key ? ' · ' + esc(b.title) : ''}</span><span class="d">${esc(fmt.num(b.value))} з ${esc(fmt.num(b.max))}</span></div><div class="feed-side"><b>${esc(fmt.pct(Math.round((b.value / b.max) * 1000) / 10))}</b></div></div>`).join('')}</div>` : '<div class="muted small">Балів ще немає.</div>'}</div>
+      <div class="card"><div class="card-title">Найбільше покращення за період</div>${s.improved.length ? `<div class="feed">${s.improved.map((b) => `<div class="feed-item"><span class="feed-ic fi-sheet">${ic('up', 16)}</span><div class="feed-body"><span class="t">${esc(b.key)}${b.title !== b.key ? ' · ' + esc(b.title) : ''}</span><span class="d">${b.pct != null ? esc(fmt.signed(b.pct, '%')) : 'нові бали'}${b.partial ? ` · з ${esc(fmt.longDay(b.fromDate))}` : ''}</span></div><div class="feed-side">${ui.delta(b.delta)}</div></div>`).join('')}</div>` : '<div class="muted small">За обраний період покращень не було.</div>'}</div>
     </div>`;
     if (act.length) {
       h += `<div class="card"><div class="card-head"><div><div class="card-title">Активність</div><div class="card-sub">Кількість змін балів за днями та їх джерело</div></div>
