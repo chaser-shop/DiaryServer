@@ -20,7 +20,7 @@
   let deviceId = LS.get('deviceId', null);
   if (!deviceId) { deviceId = makeId(); LS.set('deviceId', deviceId); }
 
-  const DEFAULT_SETTINGS = { notificationsEnabled: true, leadMinutes: 2, askHomework: true, autoOpenLink: true, notifyHomework: true };
+  const DEFAULT_SETTINGS = { notificationsEnabled: true, leadMinutes: 2, askHomework: true, autoOpenLink: true, notifyHomework: true, notifyProgress: true };
 
   const S = {
     token: LS.get('token', null),
@@ -30,6 +30,8 @@
     answered: new Set(LS.get('answered', [])),
     done: new Set(LS.get('done', [])),
     tab: 'today',
+    // Обраний підрозділ для вкладок із кількома сторінками.
+    sub: Object.assign({ progress: 'scores', admin: 'overview', settings: 'profile' }, LS.get('subs', {})),
     day: sod(new Date()),
     syncing: false, syncError: '',
     push: { supported: false, permission: 'default', subscribed: false },
@@ -38,6 +40,9 @@
     installEvent: null,
     needPassword: false,
     deviceRequests: 0,
+    unread: 0,
+    openConflicts: 0,
+    deviceTrusted: true,
     noHw: new Set(),
     schedMsg: { text: '', cls: 'muted' },
     rating: { data: null, group: '', subject: '', err: '', msg: { text: '', cls: 'muted' } },
@@ -93,6 +98,27 @@
     users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/>',
     trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
     star: '<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/>',
+    home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/>',
+    chart: '<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>',
+    bars: '<path d="M6 20V10M12 20V4M18 20v-7"/>',
+    target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>',
+    grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    sheet: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 3v18"/>',
+    alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+    list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    up: '<path d="M12 19V5M5 12l7-7 7 7"/>',
+    down: '<path d="M12 5v14M19 12l-7 7-7-7"/>',
+    info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+    check: '<path d="M20 6 9 17l-5-5"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+    link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+    upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/>',
+    sparkle: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/>',
+    device: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
+    archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v12h14V8M10 12h4"/>',
+    edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+    external: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3"/>',
   };
   const ic = (name, size = 22) =>
     `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -160,6 +186,9 @@
     S.teachers = r.teachers || {};
     S.scheduleTitle = r.scheduleTitle || '';
     S.deviceRequests = r.deviceRequests || 0;
+    S.unread = r.unread || 0;
+    S.openConflicts = r.openConflicts || 0;
+    S.deviceTrusted = r.deviceTrusted !== false;
     S.noHw = new Set(r.noHomework || []);
     if (Array.isArray(r.answered)) {
       // Відповіді, дані на іншому пристрої, підтягуються з сервера; локальні, яких там ще немає, — відправляються туди.
@@ -181,20 +210,21 @@
   async function sync() {
     if (!S.token) return;
     S.syncing = true;
-    render();
+    render({ soft: true });
     try {
       const r = await api('GET', '/api/sync');
       applySync(r);
       LS.set('cache', r);
       S.syncError = '';
       loadRating(undefined, true);
+      runHooks('sync');
       await ensurePush();
       maybeAskPush();
     } catch (e) {
       if (e.status !== 401) S.syncError = e.message;
     } finally {
       S.syncing = false;
-      render();
+      render({ soft: true });
       processRoute();
     }
   }
@@ -202,7 +232,9 @@
   function resetLocal() {
     S.lessons = []; S.homework = []; S.subjects = {}; S.teachers = {}; S.scheduleTitle = '';
     S.answered = new Set(); S.done = new Set(); S.syncError = ''; S.pushEnsured = false; S.rating = { data: null, group: '', subject: '', err: '', msg: { text: '', cls: 'muted' } };
+    S.unread = 0; S.openConflicts = 0;
     LS.del('cache'); LS.set('answered', []); LS.set('done', []);
+    runHooks('reset');
   }
 
   async function login(fullName, password) {
@@ -416,6 +448,71 @@
   const badge = (text, cls = '') => `<span class="badge ${cls}">${esc(text)}</span>`;
   const hwBadge = (h) => (h.status === 'pending' ? badge('ОЧІКУЄ ПІДТВЕРДЖЕННЯ', 'warn') : h.status === 'rejected' ? badge('ВІДХИЛЕНО', 'red') : '');
 
+  // Форматування чисел і дат українською.
+  const fNum = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 2 });
+  const fPct = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 1 });
+  const fDMY = new Intl.DateTimeFormat('uk-UA', { day: 'numeric', month: 'long', year: 'numeric' });
+  const fShort = new Intl.DateTimeFormat('uk-UA', { day: 'numeric', month: 'short' });
+  const clean = (s) => s.replace(/\u00a0/g, ' ');
+  const fmt = {
+    num: (n) => (n == null || Number.isNaN(n) ? '—' : clean(fNum.format(n))),
+    pct: (n) => (n == null || Number.isNaN(n) ? '—' : clean(fPct.format(n)) + '%'),
+    signed: (n, unit = '') => (n == null ? '—' : (n > 0 ? '+' : n < 0 ? '−' : '') + clean(fNum.format(Math.abs(n))) + unit),
+    date: (v) => { const d = v ? new Date(v) : null; if (!d || Number.isNaN(d.getTime())) return '—'; return d.getFullYear() === new Date().getFullYear() ? dayMonth(d) : fDMY.format(d); },
+    dateTime: (v) => { const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? `${fmt.date(d)}, ${hm(d)}` : '—'; },
+    dayKey: (k) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(k || ''); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; },
+    shortDay: (k) => { const d = fmt.dayKey(k); return d ? clean(fShort.format(d)).replace('.', '') : String(k || ''); },
+    longDay: (k) => { const d = fmt.dayKey(k); return d ? fmt.date(d) : String(k || ''); },
+    month: (k) => { const m = /^(\d{4})-(\d{2})/.exec(k || ''); return m ? new Intl.DateTimeFormat('uk-UA', { month: 'long', year: 'numeric' }).format(new Date(+m[1], +m[2] - 1, 1)) : String(k || ''); },
+    rel: (v) => {
+      const d = v ? new Date(v) : null;
+      if (!d || Number.isNaN(d.getTime())) return '—';
+      const s = (Date.now() - d.getTime()) / 1000;
+      if (s < 60) return 'щойно';
+      if (s < 3600) return `${Math.floor(s / 60)} хв тому`;
+      if (sameDay(d, new Date())) return `сьогодні о ${hm(d)}`;
+      if (sameDay(d, addDays(new Date(), -1))) return `учора о ${hm(d)}`;
+      return fmt.dateTime(d);
+    },
+    dayGroup: (v) => { const d = new Date(v); return sameDay(d, new Date()) ? 'Сьогодні' : sameDay(d, addDays(new Date(), -1)) ? 'Учора' : cap(fmt.date(d)); },
+    plural: (n, one, few, many) => { const a = Math.abs(n) % 100; const b = a % 10; return !Number.isInteger(n) ? few : a > 10 && a < 20 ? many : b === 1 ? one : b >= 2 && b <= 4 ? few : many; },
+  };
+
+  const SOURCE_TITLES = { sheet: 'Google-таблиця', student: 'Студент', admin: 'Адміністратор', import: 'Імпорт файлу', seed: 'Початкові дані', migration: 'Перенесення даних' };
+
+  // Спільні елементи інтерфейсу для всіх сторінок.
+  const ui = {
+    loading: () => '<div class="loading"><span class="spin"></span></div>',
+    skeleton: (n = 3, h = 86) => Array.from({ length: n }, () => `<div class="skel" style="height:${h}px"></div>`).join(''),
+    empty: (icon, title, text, action = '') => `<div class="card"><div class="empty"><span class="e-ic">${ic(icon, 26)}</span><b>${esc(title)}</b>${text ? `<p>${esc(text)}</p>` : ''}${action}</div></div>`,
+    notice: (kind, html, icon) => `<div class="notice ${kind}">${ic(icon || (kind === 'ok' ? 'check' : kind === 'info' ? 'info' : 'alert'), 18)}<div>${html}</div></div>`,
+    error: (msg, act) => `<div class="card">${ui.notice('err', esc(msg))}${act ? `<button class="btn auto ghost" data-act="${act}">${ic('refresh', 16)} Спробувати ще раз</button>` : ''}</div>`,
+    /** Зміна з кольором: up — зелений, down — червоний. good=false інвертує (наприклад, місце в рейтингу). */
+    delta(v, { unit = '', text = '', good } = {}) {
+      if (v == null || Number.isNaN(v)) return '<span class="delta flat">—</span>';
+      const positive = good === undefined ? v > 0 : good;
+      const cls = v === 0 ? 'flat' : positive ? 'up' : 'down';
+      return `<span class="delta ${cls}">${v === 0 ? '' : v > 0 ? '▲ ' : '▼ '}${esc(text || fmt.signed(v, unit))}</span>`;
+    },
+    kpi({ label, value, unit = '', sub = '', icon = '', tone = '', act = '', attrs = '' }) {
+      const tag = act ? 'button' : 'div';
+      return `<${tag} class="kpi" ${act ? `data-act="${act}"` : ''} ${attrs}><div class="k-top"><span class="k-label">${esc(label)}</span>${icon ? `<span class="k-ic ${tone}">${ic(icon, 17)}</span>` : ''}</div>
+        <div class="k-val">${value}${unit ? `<small>${esc(unit)}</small>` : ''}</div><div class="k-sub">${sub}</div></${tag}>`;
+    },
+    src: (s, text) => `<span class="badge src-${['sheet', 'student', 'admin', 'import'].includes(s) ? s : 'other'}">${esc(text || SOURCE_TITLES[s] || 'Інше')}</span>`,
+    srcIcon: (s) => `<span class="feed-ic ${['sheet', 'student', 'admin', 'import'].includes(s) ? s : ''}">${ic(s === 'sheet' ? 'sheet' : s === 'student' ? 'user' : s === 'admin' ? 'shield' : s === 'import' ? 'upload' : 'clock', 17)}</span>`,
+    change: (oldV, newV) => `<span class="change"><s>${esc(fmt.num(oldV))}</s> → ${esc(fmt.num(newV))}</span>`,
+    progress: (value, max, cls = '') => `<div class="progress ${cls}"><i style="width:${Math.max(0, Math.min(100, max ? (value / max) * 100 : 0)).toFixed(1)}%"></i></div>`,
+    pager(p, act) {
+      if (!p || !p.total) return '';
+      if (p.pages <= 1) return `<div class="pager"><span>Записів: ${p.total}</span></div>`;
+      return `<div class="pager"><span>Сторінка ${p.page} з ${p.pages} · записів: ${p.total}</span><div class="btn-row">
+        <button class="btn small ghost" data-act="${act}" data-page="${p.page - 1}" ${p.page <= 1 ? 'disabled' : ''}>${ic('left', 16)} Назад</button>
+        <button class="btn small ghost" data-act="${act}" data-page="${p.page + 1}" ${p.page >= p.pages ? 'disabled' : ''}>Далі ${ic('right', 16)}</button></div></div>`;
+    },
+    seg: (items, cur, act, attrs = '') => `<div class="seg inline" role="group" ${attrs}>${items.map(([v, t]) => `<button class="${v === cur ? 'on' : ''}" data-act="${act}" data-v="${esc(v)}">${esc(t)}</button>`).join('')}</div>`,
+  };
+
   function lessonRow(l) {
     const now = new Date();
     const ongoing = l.start <= now && now < l.end;
@@ -604,24 +701,27 @@
 
   function viewToday() {
     const first = (S.user.fullName.split(' ')[1] || S.user.fullName.split(' ')[0] || '');
-    let h = `<div class="greet"><small>${esc(cap(weekdayName(new Date())))}, ${esc(dayMonth(new Date()))}</small><h2>Привіт, ${esc(first)}</h2></div>`;
-    h += ratingMini();
-    h += installHint();
+    let left = '';
     if (!S.lessons.length) {
-      h += card(`<div class="next-title">Розкладу ще немає</div><div class="muted">${isMod()
-        ? 'Відкрийте вкладку «Налаштування» і завантажте файл розкладу (.xls) — його одразу побачать усі студенти.'
-        : 'Адміністратор чи староста ще не завантажили розклад. Зайдіть пізніше або натисніть оновлення вгорі.'}</div>`);
-      return h;
+      left += card(`<div class="next-title">Розкладу ще немає</div><div class="muted">${isAdmin()
+        ? 'Відкрийте «Адміністрування → Керування» і завантажте файл розкладу (.xls) — його одразу побачать усі студенти.'
+        : isMod() ? 'Відкрийте «Профіль → Налаштування» і завантажте файл розкладу (.xls) — його одразу побачать усі студенти.'
+          : 'Адміністратор чи староста ще не завантажили розклад. Зайдіть пізніше або натисніть оновлення вгорі.'}</div>`);
+    } else {
+      left += nextCard();
+      pendingPrompts().forEach((l) => { left += promptCard(l); });
+      const section = (title, day) => {
+        const items = lessonsOn(day);
+        return `<div class="section"><div class="sec-head"><h2>${title}</h2><span class="muted small">${dayMonth(day)}</span></div>
+          ${items.length ? items.map(lessonRow).join('') : card('<span class="muted">Пар немає</span>', 'tight')}</div>`;
+      };
+      left += section('Сьогодні', new Date()) + section('Завтра', addDays(new Date(), 1));
     }
-    h += nextCard();
-    pendingPrompts().forEach((l) => { h += promptCard(l); });
-    const section = (title, day) => {
-      const items = lessonsOn(day);
-      return `<div class="section"><div class="sec-head"><span class="label">${title}</span><span class="muted small">${dayMonth(day)}</span></div>
-        ${items.length ? items.map(lessonRow).join('') : card('<span class="muted">Пар немає</span>')}</div>`;
-    };
-    h += section('Сьогодні', new Date()) + section('Завтра', addDays(new Date(), 1));
-    return h;
+    const side = hookHtml('homeSide');
+    return `<div class="greet"><div><small>${esc(cap(weekdayName(new Date())))}, ${esc(dayMonth(new Date()))}</small><h2>Привіт, ${esc(first)}!</h2></div></div>
+      ${installHint()}
+      ${hookHtml('homeTop')}
+      <div class="home-grid"><div class="home-col">${left}</div>${side ? `<div class="home-col">${side}</div>` : ''}</div>`;
   }
 
   function viewSchedule() {
@@ -789,14 +889,7 @@
     sheets.filter((x) => x.isRatingAdmin).forEach(rerender);
   }
 
-  function ratingMini() {
-    const me = S.rating.data && S.rating.data.entries.find((e) => e.isMe);
-    if (!me) return '';
-    return `<button class="card mini-rank" data-act="tab" data-tab="rating">
-      <span class="mr-ic">${ic('trophy', 22)}</span>
-      <span class="mr-t"><small>Рейтинг · ${esc(S.rating.data.group)}${S.rating.data.subject ? ' · ' + esc(S.rating.data.subject) : ''}</small><b>${me.rank != null ? me.rank + ' місце з ' + S.rating.data.total : 'Бали ще не внесено'}</b></span>
-      <span class="mr-p">${esc(ptsText(me.points))}<small>балів</small></span></button>`;
-  }
+  function ratingTitle(key) { return (S.rating.data && S.rating.data.titles && S.rating.data.titles[key]) || key; }
 
   function rkRow(e) {
     return `<div class="rk ${medalOf(e.rank)} ${e.isMe ? 'me' : ''}" ${e.isMe ? 'id="rk-me"' : ''}>
@@ -809,51 +902,48 @@
     const R = S.rating;
     const d = R.data;
     if (!d) {
-      return R.err ? card(`<div class="err">${esc(R.err)}</div><button class="btn" data-act="ratingReload">Спробувати ще раз</button>`)
-        : '<div class="spin" style="margin:60px auto;width:28px;height:28px"></div>';
+      return R.err ? card(`<div class="err">${esc(R.err)}</div><button class="btn auto" data-act="ratingReload">Спробувати ще раз</button>`)
+        : '<div class="loading"><span class="spin"></span></div>';
     }
-    let h = '';
-    const multi = isAdmin() && (d.groups || []).length > 1;
-    if (multi) {
-      const opts = d.groups.map((g) => `<option value="${esc(g.name)}" ${g.name === d.group ? 'selected' : ''}>${esc(g.name)} · ${g.students}</option>`).join('');
-      h += `<div class="rk-bar"><select class="field" data-chg="ratingGroup" aria-label="Група">${opts}</select></div>`;
+    let bar = '';
+    if (isAdmin() && (d.groups || []).length > 1) {
+      bar += `<select class="field" data-chg="ratingGroup" aria-label="Група">${d.groups.map((g) => `<option value="${esc(g.name)}" ${g.name === d.group ? 'selected' : ''}>${esc(g.name)} · ${g.students}</option>`).join('')}</select>`;
     }
     if ((d.subjects || []).length) {
-      h += `<div class="rk-bar"><select class="field" data-chg="ratingSubject" aria-label="Предмет">
-        <option value="" ${d.subject ? '' : 'selected'}>Загальний рейтинг (сума)</option>
-        ${d.subjects.map((k) => `<option value="${esc(k)}" ${k === d.subject ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
-        ${isAdmin() ? '<button class="btn small" data-act="ratingManage">Керувати</button>' : ''}</div>`;
-    } else if (isAdmin()) {
-      h += '<div class="rk-bar"><button class="btn small" data-act="ratingManage">Керувати</button></div>';
+      bar += `<select class="field" data-chg="ratingSubject" aria-label="Предмет">
+        <option value="" ${d.subject ? '' : 'selected'}>Загальний рейтинг (сума балів)</option>
+        ${d.subjects.map((k) => `<option value="${esc(k)}" ${k === d.subject ? 'selected' : ''}>${esc(k)}${ratingTitle(k) !== k ? ' — ' + esc(ratingTitle(k)) : ''}</option>`).join('')}</select>`;
     }
+    if (isAdmin()) bar += `<button class="btn small soft" data-act="ratingManage">${ic('edit', 16)} Керувати</button>`;
+    let h = bar ? `<div class="rk-bar">${bar}</div>` : '';
     if (!d.group) {
-      return h + card(`<div class="next-title">${isAdmin() ? 'Груп ще немає' : (d.unassigned ? 'Пристрій ще не прив’язано до студента' : 'Студента ще немає в рейтингу')}</div>
-        <div class="muted">${isAdmin() ? 'Натисніть «Керувати», створіть групу й додайте студентів у рейтинг.' : (d.unassigned ? 'Адміністратор має відкрити «Учасники та пристрої» й вибрати ваше прізвище у полі «Студент» біля цього пристрою.' : 'Перевірте, чи завантажено актуальну таблицю рейтингу.')}</div>`);
+      return h + ui.empty(isAdmin() ? 'users' : 'link', isAdmin() ? 'Груп ще немає' : (d.unassigned ? 'Обліковий запис ще не прив’язано до рейтингу' : 'Вас ще немає в рейтингу'),
+        isAdmin() ? 'Натисніть «Керувати», створіть групу й додайте студентів або запустіть синхронізацію з Google-таблицею.'
+          : (d.unassigned ? 'Адміністратор має прив’язати ваш обліковий запис до запису в рейтингу (Адміністрування → Керування → Учасники та пристрої).' : 'Перевірте, чи завантажено актуальну таблицю рейтингу.'));
     }
     const ranked = d.entries.filter((e) => e.rank != null);
     const unranked = d.entries.filter((e) => e.rank == null);
     const me = d.entries.find((e) => e.isMe);
+    if (d.archived) h += ui.notice('warn', 'Ваш запис у рейтингу архівовано (вас немає в актуальній Google-таблиці). Зверніться до адміністратора, якщо це помилка.');
     if (me) {
-      const subj = Object.entries(me.subjects || {});
-      h += `<div class="card hero"><span class="label">Ваше місце · ${esc(d.group)}${d.subject ? ' · ' + esc(d.subject) : ''}</span>
+      h += `<div class="card hero"><span class="label">Ваше місце · ${esc(d.group)}${d.subject ? ' · ' + esc(ratingTitle(d.subject)) : ''}</span>
         <div class="hero-main">
-          <div class="hero-pos"><b>${me.rank != null ? me.rank : '—'}</b><span>${me.rank != null ? 'місце з ' + d.total : 'бали ще не внесено'}</span></div>
-          <div class="hero-pts"><b>${esc(ptsText(me.points))}</b><span>балів</span></div></div>
-        ${subj.length ? `<div class="subj-chips">${subj.map(([k, v]) => `<span class="sc"><small>${esc(k)}</small>${esc(ptsText(v))}</span>`).join('')}</div>` : ''}
-        <button class="btn deep" data-act="ratingJump">Показати мій рядок</button></div>`;
+          <div class="hero-pos"><b>${me.rank != null ? me.rank : '—'}</b><span>${me.rank != null ? 'місце з ' + ranked.length : 'бали ще не внесено'}</span></div>
+          <div class="hero-pts"><b>${esc(ptsText(me.points))}</b><span>${d.subject ? 'балів з предмета' : 'балів разом'}</span></div></div>
+        <button class="btn deep auto" data-act="ratingJump">Показати мій рядок</button></div>`;
     } else {
-      h += card(`<span class="label">Група ${esc(d.group)}</span>
+      h += card(`<div class="card-title">Група ${esc(d.group)}</div>
         <div class="muted">${isAdmin() ? `Студентів у рейтингу: ${d.total}.` : 'Вас немає в рейтингу цієї групи — адміністратор ще не вніс ваші бали.'}</div>`);
     }
     if (ranked.length >= 3) {
-      h += `<div class="podium">${[1, 0, 2].map((i) => { const e = ranked[i]; return `<div class="pd p${i + 1} ${medalOf(e.rank)} ${e.isMe ? 'me' : ''}">
+      h += `<div class="card"><div class="podium">${[1, 0, 2].map((i) => { const e = ranked[i]; return `<div class="pd p${i + 1} ${medalOf(e.rank)} ${e.isMe ? 'me' : ''}">
         <div class="pd-av">${esc(initialsOf(e.fullName))}</div><div class="pd-name">${esc(shortName(e.fullName))}</div>
-        <div class="pd-pts">${esc(ptsText(e.points))}</div><div class="pd-step">${e.rank}</div></div>`; }).join('')}</div>`;
+        <div class="pd-pts">${esc(ptsText(e.points))}</div><div class="pd-step">${e.rank}</div></div>`; }).join('')}</div></div>`;
     }
-    h += `<div class="section"><div class="sec-head"><span class="label">${d.subject ? 'Рейтинг · ' + esc(d.subject) : 'Рейтинг групи'}</span><span class="muted small">${d.total} ${studentsWord(d.total)}</span></div>
+    h += `<div class="section"><div class="sec-head"><h2>${d.subject ? 'Рейтинг · ' + esc(ratingTitle(d.subject)) : 'Рейтинг групи'}</h2><span class="muted small">${d.total} ${studentsWord(d.total)}</span></div>
       <div class="rk-list">${ranked.length ? ranked.map(rkRow).join('') : `<div class="rk"><span class="muted">${d.subject ? 'З цього предмета балів ще ніхто не має' : 'Балів ще ніхто не має'}</span></div>`}</div></div>`;
-    if (unranked.length) h += `<div class="section"><div class="sec-head"><span class="label">Без балів</span></div><div class="rk-list">${unranked.map(rkRow).join('')}</div></div>`;
-    return h + '<div class="foot">Рейтинг оновлюється після кожного завантаження таблиці адміністратором. Однакові бали — однакове місце.</div>';
+    if (unranked.length) h += `<div class="section"><div class="sec-head"><h2>Без балів</h2></div><div class="rk-list">${unranked.map(rkRow).join('')}</div></div>`;
+    return h + '<div class="foot">Рейтинг оновлюється автоматично після синхронізації з Google-таблицею та після кожної зміни балів. Однакові бали — однакове місце.</div>';
   }
 
   // ───────────── керування рейтингом (адмін) ─────────────
@@ -868,16 +958,16 @@
   function ratingUploadBlock() {
     const R = S.rating;
     const d = R.data;
-    return `<div><div class="label gl">Таблиця рейтингу</div><div class="list">
-        <div>${!d ? '<span class="muted">Завантаження…</span>' : d.subjects && d.subjects.length
-          ? `<div class="muted small">Студентів: ${d.total} · предмети: ${d.subjects.map(esc).join(', ')}</div>`
-          : '<span class="muted">Таблицю ще не завантажено</span>'}</div>
-        <div class="row" style="flex-wrap:wrap;gap:8px"><button class="btn small" data-act="ratingSyncNow">Оновити з Google Sheets</button>
-          <label class="row" style="cursor:pointer"><span style="color:var(--accent);font-weight:600">Завантажити файл (.xlsx / .xls / .csv)</span>
+    const st = d && d.syncStatus;
+    return `<div class="card"><div class="card-title">Таблиця рейтингу</div>
+        <div class="muted small">${!d ? 'Завантаження…' : d.subjects && d.subjects.length
+          ? `Студентів у групі: ${d.total} · предмети: ${d.subjects.map(esc).join(', ')}` : 'Таблицю ще не завантажено'}</div>
+        ${st && st.enabled ? `<div class="small ${st.lastError ? 'err' : 'muted'}">Google Sheets: ${st.lastError ? 'помилка синхронізації — ' + esc(st.lastError) : 'автоматичне оновлення увімкнено'}${st.lastSuccessAt ? ' · остання успішна перевірка: ' + esc(fmt.dateTime(st.lastSuccessAt)) : ''}</div>` : ''}
+        <div class="btn-row"><button class="btn small soft" data-act="ratingSyncNow">${ic('refresh', 16)} Оновити з Google Sheets</button>
+          <label class="btn small ghost" style="cursor:pointer">${ic('upload', 16)} Завантажити файл (.xlsx, .xls, .csv)
             <input type="file" data-chg="ratingFile" accept=".xls,.xlsx,.csv,.txt,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden></label></div>
         <div class="ratingMsg ${R.msg.cls} small" ${R.msg.text ? '' : 'hidden'}>${esc(R.msg.text)}</div>
-        ${d.syncStatus && d.syncStatus.enabled ? `<div class="small ${d.syncStatus.lastError ? 'err' : 'muted'}">Google Sheets: ${d.syncStatus.lastError ? 'помилка синхронізації — ' + esc(d.syncStatus.lastError) : 'автооновлення увімкнено'}${d.syncStatus.lastSuccessAt ? ' · останнє оновлення: ' + esc(new Date(d.syncStatus.lastSuccessAt).toLocaleString('uk-UA')) : ''}</div>` : ''}
-      </div><div class="foot">Перша колонка — ПІБ, далі — бали за кожен предмет. Google-таблиця перевіряється автоматично кожні 5 хвилин; ручне завантаження Excel залишається доступним.</div></div>`;
+        <div class="muted small">Файл: перша колонка — ПІБ, далі — бали за предметами. Імпорт файлу — рішення адміністратора: він замінює бали групи (включно зі зміненими студентами), відсутніх у файлі студентів архівує; усі зміни записуються в історію.</div></div>`;
   }
 
   function openRatingAdmin() {
@@ -926,7 +1016,7 @@
     const root = sheetOf(el).el;
     const v = (n) => { const i = root.querySelector(`[name="${n}"]`); return i ? i.value.trim() : ''; };
     const subjects = {};
-    root.querySelectorAll('[name^="s_"]').forEach((i) => { if (i.value.trim() !== '') subjects[i.name.slice(2)] = i.value.trim(); });
+    root.querySelectorAll('[name^="s_"]').forEach((i) => { subjects[i.name.slice(2)] = i.value.trim() === '' ? null : i.value.trim(); });
     if (v('x_name') && v('x_val') !== '') subjects[v('x_name')] = v('x_val');
     return { fullName: v('fullName'), group: v('group'), points: v('points') === '' ? null : v('points'), note: v('note'), subjects };
   }
@@ -941,70 +1031,71 @@
     } catch (e) { toast(e.message); el.value = el.dataset.prev; }
   }
 
-  // ───────────── адмін-панель ─────────────
+  // ───────────── керування (адміністратор, староста) ─────────────
 
   function tile(act, icon, title, sub, extra = '', attrs = '') {
     return `<button class="tile" data-act="${act}" ${attrs}><span class="tile-ic">${ic(icon, 20)}</span><span class="tile-t">${title}<small>${sub}</small></span>${extra}<span class="tile-go">${ic('right', 16)}</span></button>`;
   }
 
-  function viewAdmin() {
-    return `${ratingUploadBlock()}<div><div class="label gl">Рейтинг і групи</div><div class="list">
-        ${tile('ratingManage', 'trophy', 'Керування рейтингом', 'Студенти, бали, групи')}
-        ${tile('users', 'users', 'Учасники та пристрої', 'Прив’язка студентів, ролі, запити на вхід', S.deviceRequests ? badge(String(S.deviceRequests), 'warn') : '')}
+  /** «Адміністрування → Керування»: усе адміністрування поза аналітикою журналу. */
+  function viewManage() {
+    return `<div class="section"><div class="sec-head"><h2>Журнал і рейтинг</h2></div><div class="tiles">
+        ${tile('users', 'users', 'Учасники та пристрої', 'Ролі, групи, прив’язка до рейтингу, довіра до пристроїв', S.deviceRequests ? badge(String(S.deviceRequests), 'warn') : '')}
+        ${tile('ratingManage', 'trophy', 'Студенти й групи', 'Записи рейтингу, групи, ручне редагування')}
+        ${tile('catalogOpen', 'target', 'Предмети рейтингу', 'Повні назви й максимальні бали')}
+        ${tile('importOpen', 'upload', 'Імпорт таблиці з файлу', 'Excel або CSV, якщо Google-таблиця недоступна')}
+        ${tile('go', 'star', 'Оцінки', 'Перегляд і перевірка нових оцінок', '', 'data-tab="admin" data-sub="grades"')}
+        ${tile('go', 'bell', 'Надіслати сповіщення', 'Повідомлення на пристрої студентів', '', 'data-tab="admin" data-sub="notify"')}
       </div></div>
-      ${modBlocks(true)}
-      <div><div class="label gl">Оцінки й сповіщення</div><div class="list">
-        ${tile('go', 'star', 'Оцінки', 'Перегляд і перевірка нових оцінок', '', 'data-tab="grades"')}
-        ${tile('go', 'bell', 'Сповіщення', 'Надіслати повідомлення студентам', '', 'data-tab="notify"')}
-      </div></div>`;
+      ${modBlocks(true)}`;
   }
 
-  // Блоки «Розклад» і «Керування» — для адміністратора (вкладка «Адмін») та старости/заступника (у профілі).
+  // Блоки «Розклад» і «Навчальний процес» — для адміністратора (Керування) та старости/заступника (Налаштування).
   function modBlocks(inAdmin) {
     const q = moderationQueue().length;
-    return `<div><div class="label gl">Розклад</div><div class="list">
-        <div>${S.lessons.length
-          ? `${S.scheduleTitle ? `<div>${esc(S.scheduleTitle)}</div>` : ''}<div class="muted small">Пар у розкладі: ${S.lessons.length}${scheduleRange()}</div>`
-          : '<span class="muted">Розклад не завантажено</span>'}</div>
-        <label class="row" style="cursor:pointer"><span style="color:var(--accent);font-weight:600">Завантажити розклад (.xls / .xlsx / .csv)</span>
+    return `<div class="grid c2">
+      <div class="card"><div><div class="card-title">Розклад</div>
+          <div class="card-sub">${S.lessons.length ? `${S.scheduleTitle ? esc(S.scheduleTitle) + ' · ' : ''}Пар: ${S.lessons.length}${scheduleRange()}` : 'Розклад не завантажено'}</div></div>
+        <label class="btn soft" style="cursor:pointer">${ic('upload', 18)} Завантажити розклад (.xls, .xlsx, .csv)
           <input type="file" id="schedFile" data-chg="schedFile" accept=".xls,.xlsx,.csv,.txt,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden></label>
         <div id="schedMsg" class="${S.schedMsg.cls} small" ${S.schedMsg.text ? '' : 'hidden'}>${esc(S.schedMsg.text)}</div>
-      </div><div class="foot">Файл розбирається у браузері й відправляється на сервер — розклад одразу побачать усі. Новий файл замінює пари від його першої дати, а домашнє й посилання лишаються.</div></div>
-      <div><div class="label gl">Керування</div><div class="list">
+        <div class="muted small">Файл розбирається у браузері й одразу стає доступним усім. Новий файл замінює пари від його першої дати; домашнє й посилання зберігаються.</div></div>
+      <div class="card"><div class="card-title">Навчальний процес</div>
+        <div class="list" style="box-shadow:none;border:0;margin:0 -20px -20px;border-radius:0 0 var(--r-lg) var(--r-lg)">
         ${tile('moderation', 'book', 'Домашнє на підтвердження', 'Перевірка завдань від студентів', q ? badge(String(q), 'warn') : '')}
         ${tile('subjects', 'calendar', 'Предмети й посилання', 'Повні назви, Zoom / Meet')}
         ${tile('teachers', 'users', 'Викладачі', 'ПІБ викладачів у розкладі')}
         ${isAdmin() && !inAdmin ? tile('users', 'shield', 'Учасники та пристрої', 'Прив’язка студентів, ролі, запити на вхід', S.deviceRequests ? badge(String(S.deviceRequests), 'warn') : '') : ''}
-      </div></div>`;
+      </div></div></div>`;
   }
+
+  const roleTitle = (u = S.user) => (u && u.isAdmin ? 'Адміністратор' : u && ROLE_TITLES[u.role] ? ROLE_TITLES[u.role] : 'Студент');
 
   function viewSettings() {
     const st = S.settings;
-    const toggle = (key, label) => `<label class="row"><span>${label}</span><span class="toggle"><input type="checkbox" data-chg="setting" data-key="${key}" ${st[key] ? 'checked' : ''}><span></span></span></label>`;
-    let h = '';
-
-    h += `<div><div class="label" style="margin:0 0 6px 4px">Акаунт</div><div class="list">
-      <div class="row"><span>${esc(S.user.fullName)}</span>${roleBadge(S.user)}</div>
+    const toggle = (key, label, sub) => `<label class="row"><span>${label}${sub ? `<small class="muted" style="display:block;font-size:12.5px">${sub}</small>` : ''}</span><span class="toggle"><input type="checkbox" data-chg="setting" data-key="${key}" ${st[key] ? 'checked' : ''}><span></span></span></label>`;
+    const theme = LS.get('theme', 'auto');
+    let h = '<div class="grid c2"><div class="home-col">';
+    h += `<div><span class="label gl">Акаунт</span><div class="list">
+      <div class="row"><span class="hstack"><span class="ava">${esc(initialsOf(S.user.fullName))}</span><span><b>${esc(S.user.fullName)}</b><small class="muted" style="display:block">${esc(roleTitle())}${S.user.studentName ? ' · рейтинг: ' + esc(S.user.studentName) : ''}</small></span></span></div>
       ${S.syncError ? `<div class="err">${esc(S.syncError)}</div>` : ''}
-      <button class="row" data-act="sync"><span>Оновити дані</span></button>
-      <button class="row" data-act="share"><span>Поділитися посиланням на щоденник</span></button>
+      <button class="row" data-act="sync"><span>Оновити дані</span>${ic('refresh', 18)}</button>
+      <button class="row" data-act="share"><span>Поділитися посиланням на щоденник</span>${ic('external', 18)}</button>
       <button class="row" data-act="logout"><span style="color:var(--red)">Вийти</span></button>
     </div>${!isMod() ? '<div class="foot">Посилання на пари й імена викладачів налаштовують адміністратор і староста.</div>' : ''}</div>`;
-
-    if (isMod() && !isAdmin()) h += modBlocks(false);
-
-    const theme = LS.get('theme', 'auto');
-    h += `<div><div class="label gl">Вигляд</div><div class="seg" role="group" aria-label="Тема">${[['auto', 'Авто'], ['light', 'Світла'], ['dark', 'Темна']].map(([k, t]) => `<button class="${theme === k ? 'on' : ''}" data-act="theme" data-mode="${k}">${t}</button>`).join('')}</div></div>`;
-
+    h += `<div><span class="label gl">Тема оформлення</span><div class="seg" role="group" aria-label="Тема">${[['auto', 'Як у системі'], ['light', 'Світла'], ['dark', 'Темна']].map(([k, t]) => `<button class="${theme === k ? 'on' : ''}" data-act="theme" data-mode="${k}">${t}</button>`).join('')}</div></div>`;
+    h += hookHtml('prefs');
+    h += '</div><div class="home-col">';
     h += installHint();
-    h += `<div><div class="label" style="margin:0 0 6px 4px">Сповіщення</div><div class="list">
+    h += `<div><span class="label gl">Сповіщення на цьому пристрої</span><div class="list">
       ${toggle('notificationsEnabled', 'Нагадувати про пари')}
       <div class="row"><span>За ${st.leadMinutes} хв до початку</span><span class="stepper">
         <button data-act="lead" data-d="-1" aria-label="Менше">−</button><b>${st.leadMinutes}</b><button data-act="lead" data-d="1" aria-label="Більше">+</button></span></div>
       ${toggle('askHomework', 'Питати про домашнє після пари')}
       ${toggle('notifyHomework', 'Повідомляти про нове домашнє')}
+      ${toggle('notifyProgress', 'Успішність', 'Зміни балів, рейтингу й підсумки дня')}
       ${toggle('autoOpenLink', 'Одразу відкривати посилання на пару')}
-      <div class="row"><span>Сповіщення на цьому пристрої</span><span class="${S.push.permission === 'denied' ? 'err' : 'muted'} small" style="text-align:right">${esc(pushStatusText())}</span></div>
+      <div class="row"><span>Стан на цьому пристрої</span><span class="${S.push.permission === 'denied' ? 'err' : 'muted'} small" style="text-align:right">${esc(pushStatusText())}</span></div>
       ${S.push.supported && S.push.permission !== 'denied'
         ? (S.push.subscribed
           ? '<button class="row" data-act="pushOff"><span>Вимкнути на цьому пристрої</span></button><button class="row" data-act="pushTest"><span style="color:var(--accent)">Надіслати тестове сповіщення</span></button>'
@@ -1013,6 +1104,8 @@
       ${S.push.permission === 'denied' ? '<div class="muted small">Сповіщення заборонено в налаштуваннях пристрою чи браузера. Дозвольте їх там і поверніться сюди.</div>' : ''}
       ${S.installEvent ? '<button class="row" data-act="install"><span style="color:var(--accent)">Встановити застосунок</span></button>' : ''}
     </div><div class="foot">Сповіщення приходять із сервера, тому працюють, навіть коли щоденник закрито. Дозвіл і підписка — окремі для кожного пристрою.</div></div>`;
+    h += '</div></div>';
+    if (isMod() && !isAdmin()) h += modBlocks(false);
     return h;
   }
 
@@ -1023,71 +1116,182 @@
     return ` · ${dayMonth(a)} – ${dayMonth(b)}`;
   }
 
-  const TABS = [
-    { id: 'today', title: 'Сьогодні', short: 'Головна', icon: 'bolt' },
-    { id: 'schedule', title: 'Розклад', short: 'Розклад', icon: 'calendar' },
-    { id: 'homework', title: 'Домашня', short: 'Домашнє', icon: 'book' },
-    { id: 'rating', title: 'Рейтинг', short: 'Рейтинг', icon: 'trophy' },
-    { id: 'admin', title: 'Адмін-панель', short: 'Адмін', icon: 'shield', admin: true },
-    { id: 'settings', title: 'Налаштування', short: 'Профіль', icon: 'gear' },
-  ];
-  // Підсторінки адмін-панелі: лишаються окремими екранами, повертаються кнопкою «назад».
-  const SUBS = { grades: { id: 'grades', title: 'Оцінки', parent: 'admin' }, notify: { id: 'notify', title: 'Сповіщення', parent: 'admin' } };
-  let lastTab = null;
-  const visibleTabs = () => TABS.filter((t) => !t.admin || isAdmin());
+  // ───────────── навігація й оболонка ─────────────
 
-  function render() {
+  const NAV = [
+    { id: 'today', title: 'Головна', short: 'Головна', icon: 'home' },
+    { id: 'schedule', title: 'Розклад', short: 'Розклад', icon: 'calendar' },
+    { id: 'homework', title: 'Домашнє завдання', short: 'Домашнє', icon: 'book' },
+    {
+      id: 'progress', title: 'Успішність', short: 'Успішність', icon: 'chart', subs: [
+        { id: 'scores', title: 'Мої бали', icon: 'target' },
+        { id: 'stats', title: 'Статистика', icon: 'bars' },
+        { id: 'rating', title: 'Рейтинг групи', icon: 'trophy' },
+        { id: 'history', title: 'Історія змін', icon: 'clock' },
+      ],
+    },
+    {
+      id: 'admin', title: 'Адміністрування', short: 'Адмін', icon: 'shield', admin: true, subs: [
+        { id: 'overview', title: 'Огляд', icon: 'grid' },
+        { id: 'analytics', title: 'Аналітика', icon: 'chart' },
+        { id: 'students', title: 'Студенти', icon: 'users' },
+        { id: 'sync', title: 'Google Sheets', icon: 'sheet' },
+        { id: 'conflicts', title: 'Конфлікти', icon: 'alert' },
+        { id: 'history', title: 'Історія балів', icon: 'clock' },
+        { id: 'audit', title: 'Журнал дій', icon: 'list' },
+        { id: 'manage', title: 'Керування', icon: 'gear' },
+        { id: 'student', title: 'Студент', hidden: true, back: 'students' },
+        { id: 'grades', title: 'Оцінки', hidden: true, back: 'manage' },
+        { id: 'notify', title: 'Сповіщення студентам', hidden: true, back: 'manage' },
+      ],
+    },
+    { id: 'notifications', title: 'Сповіщення', short: 'Сповіщення', icon: 'bell', hideInTabbar: true },
+    {
+      id: 'settings', title: 'Профіль', short: 'Профіль', icon: 'user', subs: [
+        { id: 'profile', title: 'Профіль', icon: 'user' },
+        { id: 'prefs', title: 'Налаштування', icon: 'gear' },
+      ],
+    },
+  ];
+  const navVisible = () => NAV.filter((t) => !t.admin || isAdmin());
+  const navTab = (id) => navVisible().find((t) => t.id === id);
+
+  // Сторінки: вбудовані тут і зареєстровані модулями (progress.js, admin.js) через Diary.register().
+  const PAGES = {
+    today: { render: viewToday },
+    schedule: { render: viewSchedule },
+    homework: { render: viewHomework },
+    'progress/rating': { render: viewRating, enter: () => loadRating() },
+    'admin/manage': { render: viewManage },
+    'admin/grades': { render: viewGrades, enter: () => loadGrades() },
+    'admin/notify': { render: viewNotify, enter: () => loadNotifyUsers() },
+    'settings/prefs': { render: viewSettings },
+  };
+  const HOOKS = {};
+  const CHG = {};
+  const INP = {};
+  function runHooks(name, ...args) {
+    for (const fn of HOOKS[name] || []) { try { fn(...args); } catch (e) { console.error(e); } }
+  }
+  function hookHtml(name) {
+    return (HOOKS[name] || []).map((fn) => { try { return fn() || ''; } catch (e) { console.error(e); return ''; } }).join('');
+  }
+
+  function badgeFor(id) {
+    if (id === 'homework') return moderationQueue().length;
+    if (id === 'admin') return S.deviceRequests + S.openConflicts;
+    if (id === 'admin/conflicts') return S.openConflicts;
+    if (id === 'admin/manage') return S.deviceRequests + moderationQueue().length;
+    if (id === 'notifications') return S.unread;
+    return 0;
+  }
+  const dot = (n) => (n ? `<span class="dot">${n > 99 ? '99+' : n}</span>` : '');
+
+  function currentPage() {
+    const t = navTab(S.tab) || navTab('today');
+    S.tab = t.id;
+    let sub = null;
+    if (t.subs) {
+      sub = t.subs.find((x) => x.id === S.sub[t.id]) || t.subs[0];
+      S.sub[t.id] = sub.id;
+    }
+    const key = sub ? `${t.id}/${sub.id}` : t.id;
+    const page = PAGES[key] || { render: () => ui.loading() };
+    return { key, tab: t, sub, page, title: (page.title && page.title()) || (sub ? sub.title : t.title) };
+  }
+
+  /** Перехід на сторінку (вкладка + підрозділ) із завантаженням її даних. */
+  function go(tab, sub, opts = {}) {
+    S.tab = tab;
+    if (sub) S.sub[tab] = sub;
+    LS.set('subs', { progress: S.sub.progress, settings: S.sub.settings });
+    const cur = currentPage();
+    if (cur.page.enter && opts.enter !== false) cur.page.enter(opts);
+    render();
+    const m = $('main.content');
+    if (m) m.scrollTop = 0;
+  }
+
+  function sidebarHTML(cur) {
+    const item = (tab, sub, icon, title, n) => {
+      const active = cur.tab.id === tab && (!sub || cur.sub.id === sub || cur.sub.back === sub);
+      return `<button class="sb-item ${active ? 'active' : ''}" data-act="go" data-tab="${tab}" ${sub ? `data-sub="${sub}"` : ''}>${ic(icon, 19)}<span>${title}</span>${dot(n)}</button>`;
+    };
+    let h = `<div class="sb-inner"><div class="sb-brand"><img src="/icons/icon-192.png" alt=""><div><b>Щоденник</b><small>Журнал успішності</small></div></div>`;
+    h += '<div class="sb-label">Навчання</div>' + item('today', null, 'home', 'Головна') + item('schedule', null, 'calendar', 'Розклад') + item('homework', null, 'book', 'Домашнє завдання', badgeFor('homework'));
+    h += '<div class="sb-label">Успішність</div>' + navTab('progress').subs.map((s) => item('progress', s.id, s.icon, s.title)).join('');
+    if (isAdmin()) h += '<div class="sb-label">Адміністрування</div>' + navTab('admin').subs.filter((s) => !s.hidden).map((s) => item('admin', s.id, s.icon, s.title, badgeFor('admin/' + s.id))).join('');
+    h += '<div class="sb-spacer"></div>' + item('notifications', null, 'bell', 'Сповіщення', S.unread) + item('settings', 'prefs', 'gear', 'Налаштування');
+    h += `<button class="sb-user" data-act="go" data-tab="settings" data-sub="profile"><span class="ava">${esc(initialsOf(S.user.fullName))}</span><span class="who"><b>${esc(S.user.fullName)}</b><small>${esc(roleTitle())}</small></span></button></div>`;
+    return h;
+  }
+
+  let lastKey = null;
+  /** soft — фонове оновлення: не перемальовуємо, поки людина вводить текст. */
+  function render(opts = {}) {
     const app = $('#app');
     if (!S.user) {
       removePushAsk();
-      if (S.token) { app.innerHTML = '<div class="login"><div class="spin" style="margin:80px auto;width:28px;height:28px"></div></div>'; return; }
+      if (S.token) { app.innerHTML = '<div class="login-wrap"><span class="spin" style="width:28px;height:28px"></span></div>'; return; }
       if (!$('#loginForm')) app.innerHTML = viewLogin();
       return;
     }
     const a = document.activeElement;
-    if (S.tab === 'notify' && a && a.closest && a.closest('main') && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return; // не збиваємо введення
+    const typing = !!(a && a.closest && a.closest('main.content') && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
+    if (opts.soft && typing) return;
+    const focus = typing && a.id ? { id: a.id, s: a.selectionStart, e: a.selectionEnd } : null;
     const oldMain = $('main.content');
     const y = oldMain ? oldMain.scrollTop : 0;
-    const views = { today: viewToday, schedule: viewSchedule, homework: viewHomework, rating: viewRating, admin: viewAdmin, grades: viewGrades, notify: viewNotify, settings: viewSettings };
-    const tabs = visibleTabs();
-    const sub = isAdmin() ? SUBS[S.tab] : null;
-    const cur = sub || tabs.find((t) => t.id === S.tab) || tabs[0];
-    const activeTab = sub ? sub.parent : cur.id;
-    const entering = lastTab !== cur.id;
-    lastTab = cur.id;
-    const q = moderationQueue().length;
+    const cur = currentPage();
+    const entering = lastKey !== cur.key;
+    lastKey = cur.key;
+    const back = cur.sub && cur.sub.back ? cur.sub.back : null;
+    const subnav = cur.tab.subs && !back ? cur.tab.subs.filter((s) => !s.hidden) : null;
     app.innerHTML = `
-      <header class="topbar"><div class="tb-l">${sub ? `<button class="icon-btn" data-act="back" aria-label="Назад">${ic('left', 22)}</button>` : ''}<h1>${cur.title}</h1></div><div class="right">
-        ${S.tab === 'schedule' ? '<button class="link" data-act="goToday">Сьогодні</button>' : ''}
-        <button class="icon-btn ${S.syncing ? 'refreshing' : ''}" data-act="sync" aria-label="Оновити">${ic('refresh', 20)}</button>
-      </div></header>
-      <main class="content ${entering ? 'enter' : ''}">${views[cur.id]()}</main>
-      <nav class="tabbar"><div class="tabbar-in">${tabs.map((t) => `
-        <button class="tab ${t.id === activeTab ? 'active' : ''}" data-act="tab" data-tab="${t.id}">${ic(t.icon, 22)}<span>${t.short}</span>
-          ${t.id === 'homework' && q ? `<span class="dot">${q}</span>` : ''}${t.id === 'admin' && S.deviceRequests ? `<span class="dot">${S.deviceRequests}</span>` : ''}</button>`).join('')}</div></nav>`;
+      <aside class="sidebar">${sidebarHTML(cur)}</aside>
+      <div class="main">
+        <header class="topbar"><div class="tb-l">${back ? `<button class="icon-btn" data-act="go" data-tab="${cur.tab.id}" data-sub="${back}" aria-label="Назад">${ic('left', 22)}</button>` : ''}
+            <div style="min-width:0">${cur.sub && cur.tab.subs.length > 2 ? `<span class="crumb">${esc(cur.tab.title)}</span>` : ''}<h1>${esc(cur.title)}</h1></div></div>
+          <div class="right">
+            ${cur.tab.id === 'schedule' ? '<button class="link" data-act="goToday">Сьогодні</button>' : ''}
+            <button class="icon-btn ${S.syncing ? 'refreshing' : ''}" data-act="sync" aria-label="Оновити" title="Оновити">${ic('refresh', 20)}</button>
+            <button class="icon-btn" data-act="go" data-tab="notifications" aria-label="Сповіщення" title="Сповіщення">${ic('bell', 21)}${dot(S.unread)}</button>
+          </div></header>
+        <main class="content ${entering ? 'enter' : ''}"><div class="page">
+          ${subnav ? `<nav class="subnav tb-mobile" aria-label="Розділи">${subnav.map((s) => `<button class="${s.id === cur.sub.id ? 'on' : ''}" data-act="go" data-tab="${cur.tab.id}" data-sub="${s.id}">${esc(s.title)}${dot(badgeFor(cur.tab.id + '/' + s.id))}</button>`).join('')}</nav>` : ''}
+          ${cur.page.render()}
+        </div></main>
+        <nav class="tabbar" aria-label="Навігація"><div class="tabbar-in">${navVisible().filter((t) => !t.hideInTabbar).map((t) => `
+          <button class="tab ${t.id === cur.tab.id ? 'active' : ''}" data-act="go" data-tab="${t.id}">${ic(t.icon, 22)}<span>${t.short}</span>${dot(badgeFor(t.id))}</button>`).join('')}</div></nav>
+      </div>`;
     const newMain = $('main.content');
     if (newMain) newMain.scrollTop = y;
+    if (focus) {
+      const el = document.getElementById(focus.id);
+      if (el) { el.focus(); try { el.setSelectionRange(focus.s, focus.e); } catch (e) { /* поле без курсора */ } }
+    }
     refreshSheets();
+    if (window.Charts) Charts.mount(app);
   }
 
   function viewLogin() {
-    return `<div class="login">
+    return `<div class="login-wrap"><div class="login">
       <img class="logo" src="/icons/icon-192.png" alt="">
-      <div><h1>Щоденник студента</h1><div class="muted">Введіть прізвище, ім’я та по батькові</div></div>
+      <div><h1>Щоденник студента</h1><div class="muted">Розклад, домашнє завдання, бали та статистика успішності в одному місці</div></div>
       <form id="loginForm" autocomplete="on">
-        <div class="card" style="gap:12px">
-          <span class="label">ПІБ</span>
+        <div class="card">
+          <label class="label" for="fullName">Прізвище, ім’я та по батькові</label>
           <input class="field" id="fullName" name="name" type="text" autocomplete="name" autocapitalize="words" autocorrect="off" spellcheck="false" placeholder="Іваненко Іван Іванович" required>
-          <div id="passWrap" ${S.needPassword ? '' : 'hidden'} style="display:${S.needPassword ? 'flex' : 'none'};flex-direction:column;gap:12px">
-            <span class="label">Пароль адміністратора</span>
+          <div id="passWrap" ${S.needPassword ? '' : 'hidden'} style="display:${S.needPassword ? 'flex' : 'none'};flex-direction:column;gap:10px">
+            <label class="label" for="adminPass">Пароль адміністратора</label>
             <input class="field" id="adminPass" type="password" autocomplete="current-password" placeholder="Потрібен для нового пристрою">
           </div>
-          <div class="muted small">Під цим ПІБ вас бачитиме адміністратор. На новому пристрої він має підтвердити вхід — запит піде йому автоматично.</div>
+          <div class="muted small">Під цим ПІБ вас бачитиме адміністратор. Вхід із нового пристрою може потребувати його підтвердження.</div>
+          <div id="loginErr" class="err" style="text-align:center">${esc(loginNotice)}</div>
+          <button class="btn big" id="loginBtn" type="submit">Увійти</button>
         </div>
-        <div id="loginErr" class="err" style="margin:12px 0;text-align:center">${esc(loginNotice)}</div>
-        <button class="btn" id="loginBtn" type="submit">Увійти</button>
       </form>
-    </div>`;
+    </div></div>`;
   }
 
   // ───────────── шторки (модальні вікна) ─────────────
@@ -1096,7 +1300,7 @@
 
   function sheetHTML(s) {
     const title = typeof s.title === 'function' ? s.title() : s.title;
-    return `<div class="sheet" role="dialog" aria-modal="true">
+    return `<div class="sheet ${s.wide ? 'wide' : ''}" role="dialog" aria-modal="true">
       <div class="sh-head"><div class="side"><button class="link" data-act="closeSheet">${esc(s.closeLabel || 'Закрити')}</button></div>
         <h2>${esc(title)}</h2><div class="side r">${s.right ? s.right() : ''}</div></div>
       <div class="sh-body">${s.render()}</div></div>`;
@@ -1110,6 +1314,7 @@
     sheets.push(s);
     document.body.classList.add('noscroll');
     history.pushState({ sheet: sheets.length }, '');
+    if (window.Charts) Charts.mount(s.el);
     return s;
   }
 
@@ -1123,6 +1328,7 @@
     body.innerHTML = s.render();
     s.el.querySelectorAll('[name]').forEach((i) => { if (i.name in keep) i.value = keep[i.name]; });
     body.scrollTop = top;
+    if (window.Charts) Charts.mount(s.el);
   }
 
   function refreshSheets() {
@@ -1304,38 +1510,57 @@
 
   const fWhen = (v) => { const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? `${dayMonth(d)}, ${hm(d)}` : ''; };
 
+  /** Учасники: ролі, групи, прив’язка до рейтингу, пристрої (підтвердження, довіра, відв’язування). */
   function openUsers() {
-    const s = { auto: false, title: 'Учасники та групи', users: null, students: [], groups: [], err: '' };
+    const s = { auto: false, wide: true, title: 'Учасники та пристрої', users: null, students: [], groups: [], suggestions: [], q: '', err: '' };
     s.render = () => {
-      if (s.err) return `<div class="err">${esc(s.err)}</div>`;
-      if (!s.users) return '<div class="muted">Завантаження…</div>';
-      const list = [...s.users].sort((a, b) => (b.pending.length > 0) - (a.pending.length > 0) || a.fullName.localeCompare(b.fullName, 'uk'));
-      return '<div class="muted small">Оберіть студента рейтингу для облікового запису людини. Прив’язка зберігається за людиною, тому всі її підтверджені пристрої показуватимуть один і той самий рейтинг. Нові пристрої підтверджуються адміністратором.</div>' +
-        list.map((u) => card(`
-          <div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(u.fullName)}</b>${roleBadge(u)}</div>
-          ${u.isAdmin ? '' : `<label><span class="label">Група</span><select class="field" data-chg="userGroup" data-user="${esc(u.id)}"><option value="">Не призначено</option>${(s.groups || []).map((g) => `<option value="${esc(g.name)}" ${u.group === g.name ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>`}
-          ${u.isAdmin ? '' : `<label><span class="label">Роль</span><select class="field" data-chg="userRole" data-user="${esc(u.id)}"><option value="" ${!u.role ? 'selected' : ''}>Студент</option><option value="starosta" ${u.role === 'starosta' ? 'selected' : ''}>Староста</option><option value="deputy" ${u.role === 'deputy' ? 'selected' : ''}>Заступник старости</option></select></label>`}
-          ${u.isAdmin ? '' : `<label><span class="label">Студент рейтингу</span><select class="field" data-chg="accountStudent" data-user="${esc(u.id)}"><option value="">Не призначено</option>${(s.students || []).map((st) => `<option value="${esc(st.id)}" ${u.studentId === st.id ? 'selected' : ''}>${esc(st.fullName)}${st.group ? ' · ' + esc(st.group) : ''}</option>`).join('')}</select></label><div class="muted small">${u.studentName ? 'У головному меню показується рейтинг: ' + esc(u.studentName) : 'Оберіть студента — його рейтинг відображатиметься на всіх пристроях цього акаунта.'}</div>`}
+      if (s.err) return ui.notice('err', esc(s.err));
+      if (!s.users) return ui.loading();
+      const q = s.q.trim().toLocaleLowerCase('uk');
+      const list = [...s.users].filter((u) => !q || u.fullName.toLocaleLowerCase('uk').includes(q))
+        .sort((a, b) => (b.pending.length > 0) - (a.pending.length > 0) || a.fullName.localeCompare(b.fullName, 'uk'));
+      let h = ui.notice('info', 'Прив’язка до рейтингу зберігається за людиною: усі її пристрої показують той самий рейтинг. Підвищувати власні бали можна лише з <b>довіреного</b> пристрою — першого, доданого паролем або підтвердженого тут. Перед прив’язкою переконайтеся, що обліковий запис належить цьому студентові.');
+      if (s.suggestions.length) {
+        h += `<div class="card"><div class="spread wrap"><div><div class="card-title">Збіги ПІБ</div><div class="card-sub">Облікових записів без прив’язки, ПІБ яких збігається зі студентом рейтингу: ${s.suggestions.length}</div></div>
+          <button class="btn small" data-act="linkSuggested">${ic('link', 16)} Прив’язати всі</button></div>
+          <div class="muted small">${s.suggestions.slice(0, 8).map((x) => esc(x.userName) + ' → ' + esc(x.group)).join(' · ')}${s.suggestions.length > 8 ? ' …' : ''}</div></div>`;
+      }
+      h += `<input class="field" name="usersQ" id="usersQ" type="search" placeholder="Пошук за ПІБ" value="${esc(s.q)}" data-inp="usersQ">`;
+      h += list.length ? list.map((u) => card(`
+          <div class="spread"><div class="hstack"><span class="ava">${esc(initialsOf(u.fullName))}</span><div><b>${esc(u.fullName)}</b>
+            <div class="muted xs">${u.lastSeenAt ? 'Активність: ' + esc(fmt.rel(u.lastSeenAt)) : 'Ще не заходив(-ла) після оновлення'}</div></div></div>${roleBadge(u)}</div>
+          ${u.isAdmin ? '' : `<div class="grid c3">
+            <label><span class="label">Група</span><select class="field" data-chg="userGroup" data-user="${esc(u.id)}"><option value="">Не призначено</option>${(s.groups || []).map((g) => `<option value="${esc(g.name)}" ${u.group === g.name ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>
+            <label><span class="label">Роль</span><select class="field" data-chg="userRole" data-user="${esc(u.id)}"><option value="" ${!u.role ? 'selected' : ''}>Студент</option><option value="starosta" ${u.role === 'starosta' ? 'selected' : ''}>Староста</option><option value="deputy" ${u.role === 'deputy' ? 'selected' : ''}>Заступник старости</option></select></label>
+            <label><span class="label">Студент рейтингу</span><select class="field" data-chg="accountStudent" data-user="${esc(u.id)}"><option value="">Не прив’язано</option>${(s.students || []).map((st) => `<option value="${esc(st.id)}" ${u.studentId === st.id ? 'selected' : ''}>${esc(st.fullName)}${st.group ? ' · ' + esc(st.group) : ''}${st.active === false ? ' (архів)' : ''}</option>`).join('')}</select></label></div>`}
           ${u.pending.length ? `<div class="label" style="color:var(--warn)">Запити на новий пристрій</div>` + u.pending.map((p) => `
             <div class="dev"><div class="dn">${esc(p.label)}<div class="muted small">${esc(fWhen(p.requestedAt))}</div></div>
-              <div style="display:flex;gap:6px"><button class="btn green small" data-act="devApprove" data-user="${esc(u.id)}" data-key="${esc(p.key)}">Підтвердити</button>
-              <button class="btn red small" data-act="devReject" data-user="${esc(u.id)}" data-key="${esc(p.key)}">Ні</button></div></div>`).join('') : ''}
-          <div class="label">Пристрої (${u.devices})</div>
+              <div class="btn-row" style="flex-wrap:nowrap"><button class="btn green small" data-act="devApprove" data-user="${esc(u.id)}" data-key="${esc(p.key)}">Підтвердити</button>
+              <button class="btn red small" data-act="devReject" data-user="${esc(u.id)}" data-key="${esc(p.key)}">Відхилити</button></div></div>`).join('') : ''}
+          <div class="label">Пристрої · ${u.devices}</div>
           ${u.deviceList.length ? u.deviceList.map((d) => `
-            <div class="dev"><div class="dn">${esc(d.label)}${d.addedAt ? `<div class="muted small">додано ${esc(fWhen(d.addedAt))}</div>` : ''}
-              <div class="muted small">Пристрій належить обліковому запису ${esc(u.fullName)}. Рейтинг задається вище для всієї людини.</div></div>
-              <button class="btn deep small" data-act="devRemove" data-user="${esc(u.id)}" data-key="${esc(d.key)}" data-name="${esc(u.fullName)}">Видалити</button></div>`).join('')
+            <div class="dev"><div class="dn">${ic('device', 15)}<span>${esc(d.label)}</span> ${d.trusted ? badge('Довірений', 'accent') : badge('Не підтверджено', 'warn')}${d.addedAt ? `<div class="muted small">додано ${esc(fWhen(d.addedAt))}</div>` : ''}</div>
+              <div class="btn-row" style="flex-wrap:nowrap">${u.isAdmin ? '' : d.trusted
+                ? `<button class="btn ghost small" data-act="devTrust" data-user="${esc(u.id)}" data-key="${esc(d.key)}" data-trusted="0">Зняти довіру</button>`
+                : `<button class="btn green small" data-act="devTrust" data-user="${esc(u.id)}" data-key="${esc(d.key)}" data-trusted="1">Довіряти</button>`}
+              <button class="btn deep small" data-act="devRemove" data-user="${esc(u.id)}" data-key="${esc(d.key)}" data-name="${esc(u.fullName)}">Відв’язати</button></div></div>`).join('')
             : '<div class="muted small">Немає — перший пристрій, з якого людина увійде, стане основним.</div>'}
-          <div class="btn-row">${u.devices > 1 ? `<button class="btn deep" data-act="resetDevices" data-id="${esc(u.id)}">Відв’язати всі</button>` : ''}
-            ${u.id !== S.user.id ? `<button class="btn red" data-act="deleteUser" data-id="${esc(u.id)}" data-name="${esc(u.fullName)}">Видалити людину</button>` : ''}</div>`, u.pending.length ? 'pending-box' : '')).join('');
+          <div class="btn-row">${u.devices > 1 ? `<button class="btn ghost small" data-act="resetDevices" data-id="${esc(u.id)}">Відв’язати всі пристрої</button>` : ''}
+            ${u.id !== S.user.id ? `<button class="btn red small" data-act="deleteUser" data-id="${esc(u.id)}" data-name="${esc(u.fullName)}">Видалити обліковий запис</button>` : ''}</div>`, u.pending.length ? 'pending-box' : '')).join('')
+        : ui.empty('users', 'Нікого не знайдено', 'Змініть пошуковий запит.');
+      return h;
     };
     s.reload = async () => {
-      try { [s.users, s.students, s.groups] = await Promise.all([api('GET', '/api/admin/users'), api('GET', '/api/admin/rating-students'), api('GET', '/api/admin/groups')]); s.err = ''; } catch (e) { s.err = e.message; }
+      try {
+        const [users, students, groups, sug] = await Promise.all([api('GET', '/api/admin/users'), api('GET', '/api/admin/rating-students'), api('GET', '/api/admin/groups'), api('GET', '/api/admin/link-suggestions')]);
+        Object.assign(s, { users, students, groups, suggestions: sug.items || [], err: '' });
+      } catch (e) { s.err = e.message; }
       if (sheets.includes(s)) rerender(s);
     };
     openSheet(s);
     s.reload();
   }
+
 
   // ───────────── сповіщення ─────────────
 
@@ -1355,7 +1580,7 @@
 
   const pushSettings = () => ({
     notificationsEnabled: S.settings.notificationsEnabled, leadMinutes: S.settings.leadMinutes,
-    askHomework: S.settings.askHomework, notifyHomework: S.settings.notifyHomework,
+    askHomework: S.settings.askHomework, notifyHomework: S.settings.notifyHomework, notifyProgress: S.settings.notifyProgress !== false,
   });
 
   async function refreshPushState() {
@@ -1595,9 +1820,9 @@
   }
 
   const ACT = {
-    tab(el) { S.tab = el.dataset.tab; const m0 = $('main.content'); if (m0) m0.scrollTop = 0; render(); const m1 = $('main.content'); if (m1) m1.scrollTop = 0; if (S.tab === 'notify') loadNotifyUsers(); if (S.tab === 'grades') loadGrades(); if (S.tab === 'rating') loadRating(); if (S.tab === 'admin' && isAdmin() && !S.rating.data) loadRating(undefined, true); },
-    go(el) { ACT.tab(el); },
-    back() { S.tab = 'admin'; render(); },
+    tab(el) { go(el.dataset.tab, el.dataset.sub); },
+    go(el) { go(el.dataset.tab, el.dataset.sub); },
+    back() { go('admin', 'manage'); },
     ratingReload() { loadRating(); },
     async ratingSyncNow() { try { toast('Оновлюю рейтинг…'); await api('POST', '/api/admin/rating/sync', {}); await loadRating(undefined, true); toast('Рейтинг оновлено з Google Sheets'); } catch (e) { toast(e.message || 'Помилка синхронізації'); } },
     ratingManage() { openRatingAdmin(); },
@@ -1657,7 +1882,34 @@
       g.checking = false;
       render();
     },
-    sync() { sync(); if (S.tab === 'grades' && isAdmin()) loadGrades(); },
+    sync() {
+      sync();
+      const cur = currentPage();
+      if (cur.page.enter) cur.page.enter({ refresh: true });
+    },
+    async devTrust(el) {
+      const s = sheetOf(el);
+      const trusted = el.dataset.trusted === '1';
+      await withBusy(el, async () => {
+        try {
+          await api('POST', `/api/admin/users/${encodeURIComponent(el.dataset.user)}/devices/${encodeURIComponent(el.dataset.key)}/trust`, { trusted });
+          toast(trusted ? 'Пристрій позначено довіреним' : 'Довіру до пристрою знято');
+        } catch (e) { toast(e.message); }
+      });
+      if (s && s.reload) await s.reload();
+    },
+    async linkSuggested(el) {
+      const s = sheetOf(el);
+      if (!s || !s.suggestions.length) return;
+      if (!confirm(`Прив’язати ${s.suggestions.length} облікових записів до студентів рейтингу за збігом ПІБ?`)) return;
+      await withBusy(el, async () => {
+        try {
+          const r = await api('POST', '/api/admin/link-suggestions/apply', { userIds: s.suggestions.map((x) => x.userId) });
+          toast(`Прив’язано: ${r.linked}`);
+        } catch (e) { toast(e.message); }
+      });
+      await s.reload();
+    },
     lesson(el) { openLesson(el.dataset.id); },
     day(el) { S.day = sod(new Date(+el.dataset.ts)); render(); },
     shift(el) { S.day = addDays(S.day, +el.dataset.d); render(); },
@@ -1926,7 +2178,11 @@
     } else if (el.dataset.chg === 'accountStudent') {
       const s = sheetOf(el);
       api('POST', `/api/admin/users/${encodeURIComponent(el.dataset.user)}/student`, { studentId: el.value })
-        .then(() => { toast(el.value ? 'Рейтинг студента призначено' : 'Прив’язку до рейтингу знято'); if (s && s.reload) s.reload(); })
+        .then((r) => {
+          const also = r && r.alsoLinked && r.alsoLinked.length ? ` Увага: цей студент також прив’язаний до: ${r.alsoLinked.join(', ')}.` : '';
+          toast((el.value ? 'Обліковий запис прив’язано до рейтингу.' : 'Прив’язку до рейтингу знято.') + also);
+          if (s && s.reload) s.reload();
+        })
         .catch((e) => { toast(e.message); if (s && s.reload) s.reload(); });
     } else if (el.dataset.chg === 'ratingGroup') {
       loadRating(el.value);
@@ -1950,11 +2206,26 @@
       const f = el.files[0];
       el.value = '';
       importSchedule(f);
+    } else if (CHG[el.dataset.chg]) {
+      CHG[el.dataset.chg](el, e);
     }
   });
 
+  let usersQTimer = null;
   document.addEventListener('input', (e) => {
     const el = e.target.closest('[data-inp]');
+    if (el && INP[el.dataset.inp]) INP[el.dataset.inp](el, e);
+    if (el && el.dataset.inp === 'usersQ') {
+      const s = sheetOf(el);
+      clearTimeout(usersQTimer);
+      usersQTimer = setTimeout(() => {
+        if (!s) return;
+        s.q = el.value;
+        rerender(s);
+        const inp = $('#usersQ', s.el);
+        if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+      }, 200);
+    }
     if (el && el.dataset.inp === 'notifyField') S.notify[el.dataset.key] = el.value;
     if (el && el.dataset.inp === 'ratingSubj') {
       const root = el.closest('.sh-body');
@@ -2015,10 +2286,34 @@
     if (p.has('lesson')) openLesson(p.get('lesson'), { join: p.get('join') === '1' });
     else if (p.has('homework')) { const l = lessonById(p.get('homework')); openHomeworkForm(l ? newHomework(l) : blankHomework()); }
     else if (p.has('answered')) { answerNone(p.get('answered')); toast('Добре, відмітили'); }
-    else if (p.get('tab') === 'users') { if (isAdmin()) { S.tab = 'admin'; render(); openUsers(); } }
-    else if (p.get('tab') === 'moderation') { if (isMod()) { S.tab = 'homework'; render(); openModeration(); } }
-    else if (p.get('tab')) { S.tab = visibleTabs().some((t) => t.id === p.get('tab')) || (isAdmin() && SUBS[p.get('tab')]) ? p.get('tab') : 'today'; render(); if (S.tab === 'grades') loadGrades(); if (S.tab === 'rating') loadRating(); }
+    else if (p.get('tab') === 'users') { if (isAdmin()) { go('admin', 'manage'); openUsers(); } }
+    else if (p.get('tab') === 'moderation') { if (isMod()) { go('homework'); openModeration(); } }
+    else if (p.get('tab')) {
+      // Старі посилання зі сповіщень (rating, grades, notify) ведуть на нові сторінки.
+      const legacy = { rating: ['progress', 'rating'], grades: ['admin', 'grades'], notify: ['admin', 'notify'] };
+      let [tab, sub] = legacy[p.get('tab')] || [p.get('tab'), p.get('sub')];
+      if (!navTab(tab)) { tab = 'today'; sub = null; }
+      go(tab, sub || undefined);
+    }
   }
+
+  // ───────────── модулі ─────────────
+  // progress.js (успішність студента) і admin.js (адміністрування) підключаються після app.js
+  // і реєструють свої сторінки, дії та обробники через Diary.register().
+
+  window.Diary = {
+    S, api, render, go, toast, esc, ic, card, badge, LS, ui, fmt, SOURCE_TITLES,
+    openSheet, rerender, closeSheet, sheetOf, withBusy, setMsg, currentPage,
+    isAdmin, isMod, roleBadge, initialsOf, shortName, studentsWord, ptsText, subjColor,
+    loadRating, openUsers, openRatingAdmin, ratingUploadBlock, modBlocks,
+    register(mod) {
+      Object.assign(PAGES, mod.pages || {});
+      Object.assign(ACT, mod.actions || {});
+      Object.assign(CHG, mod.changes || {});
+      Object.assign(INP, mod.inputs || {});
+      for (const [k, fn] of Object.entries(mod.hooks || {})) (HOOKS[k] = HOOKS[k] || []).push(fn);
+    },
+  };
 
   // ───────────── запуск ─────────────
 
@@ -2041,11 +2336,14 @@
     }
     render();
     refreshPushState();
-    if (S.token) sync();
+    if (S.token) {
+      sync();
+      if (S.user) { const cur = currentPage(); if (cur.page.enter) cur.page.enter({}); }
+    }
 
     setInterval(() => {
       if (!S.user || sheets.length || document.hidden) return;
-      if (S.tab === 'today' || S.tab === 'schedule') render();
+      if (S.tab === 'today' || S.tab === 'schedule') render({ soft: true });
     }, 30000);
     setInterval(() => { if (S.user && !document.hidden) sync(); }, 120000);
     document.addEventListener('visibilitychange', () => {
@@ -2055,5 +2353,7 @@
     });
   }
 
-  boot();
+  // Модулі (progress.js, admin.js) завантажуються після app.js і реєструються до DOMContentLoaded.
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else setTimeout(boot, 0);
 })();
