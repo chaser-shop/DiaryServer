@@ -516,7 +516,7 @@
 
     const series = st.series || [];
     const lineTotal = Charts.line({ labels: series.map((x) => fmt.shortDay(x.date)), tipLabels: series.map((x) => fmt.longDay(x.date)), series: [{ name: 'Загальний бал', color: 'var(--c1)', values: series.map((x) => x.total) }], area: true, height: 200, label: 'Загальний бал за 30 днів' });
-    const lineRank = Charts.line({ labels: series.map((x) => fmt.shortDay(x.date)), tipLabels: series.map((x) => fmt.longDay(x.date)), series: [{ name: 'Місце', color: 'var(--c4)', values: series.map((x) => x.rank) }], invert: true, integer: true, height: 200, format: (v) => (v == null ? '—' : `${Math.round(v)}`), label: 'Місце в групі' });
+    const lineRank = Charts.line({ labels: series.map((x) => fmt.shortDay(x.date)), tipLabels: series.map((x) => fmt.longDay(x.date)), series: [{ name: 'Місце', color: 'var(--c4)', values: series.map((x) => x.rank) }], invert: true, integer: true, min: 1, height: 200, format: (v) => (v == null ? '—' : `${Math.round(v)}`), label: 'Місце в групі' });
     h += `<div class="grid c2">${box('Загальний бал', 'Останні 30 днів', lineTotal)}${box('Місце в групі', 'Чим вище лінія, тим краще місце', lineRank)}</div>`;
 
     h += box('Бали за предметами', 'Поточне значення, джерело останньої зміни й значення в Google-таблиці', `<div class="tbl-wrap stack"><table class="tbl stack">
@@ -686,7 +686,7 @@
           const st = x.stats || {};
           return `<tr class="click" data-act="aRun" data-id="${esc(x.id)}">
             <td class="head nowrap"><span>${esc(fmt.dateTime(x.startedAt))}${x.repeats ? `<span class="sub">і ще ${esc(plural(x.repeats, 'перевірка', 'перевірки', 'перевірок'))} без змін, остання ${esc(fmt.rel(x.lastRepeatAt))}</span>` : ''}</span></td>
-            <td data-label="Запуск"><span>${esc(RUN_KIND[x.kind] || x.kind)}${x.forced ? ' · примусово' : ''}${x.actorName ? `<span class="sub">${esc(x.actorName)}</span>` : ''}</span></td>
+            <td data-label="Запуск"><span>${esc(RUN_KIND[x.kind] || x.kind)}${x.forced ? ' · примусово' : ''}${x.kind === 'manual' && x.actorName ? `<span class="sub">${esc(x.actorName)}</span>` : ''}</span></td>
             <td data-label="Результат"><span>${runBadge(x.status)}${x.warnings.length ? ` <span class="xs muted" title="Попередження">${ic('alert', 12)} ${x.warnings.length}</span>` : ''}</span></td>
             <td class="r" data-label="Рядків">${st.rows || 0}</td><td class="r" data-label="Змінено балів">${st.changedScores || 0}</td>
             <td class="r" data-label="Нових">${st.newStudents || 0}</td><td class="r" data-label="Конфлікти">${st.conflicts || 0}</td>
@@ -708,7 +708,7 @@
     D.openSheet({
       title: 'Синхронізація', auto: false,
       render: () => `<div class="form">
-        <div class="hstack wrap" style="gap:8px">${runBadge(x.status)}<span class="muted small">${esc(fmt.dateTime(x.startedAt))} · ${esc(RUN_KIND[x.kind] || x.kind)}${x.forced ? ' · примусово' : ''}${x.actorName ? ' · ' + esc(x.actorName) : ''}</span></div>
+        <div class="hstack wrap" style="gap:8px">${runBadge(x.status)}<span class="muted small">${esc(fmt.dateTime(x.startedAt))} · ${esc(RUN_KIND[x.kind] || x.kind)}${x.forced ? ' · примусово' : ''}${x.kind === 'manual' && x.actorName ? ' · ' + esc(x.actorName) : ''}</span></div>
         ${x.error ? ui.notice('err', esc(x.error)) : ''}
         <dl class="dl">${rows.map(([t, v]) => `<dt>${t}</dt><dd>${v || 0}</dd>`).join('')}
           <dt>Тривалість</dt><dd>${esc(fmt.num(round2((x.durationMs || 0) / 1000)))} с</dd>
@@ -805,6 +805,7 @@
     const out = [];
     if (d.subject && ('from' in d || 'to' in d)) out.push(`${esc(d.subject)}: ${num(d.from)} → ${num(d.to)}`);
     else if (d.subject) out.push(esc(d.subject));
+    if (a.action === 'system.migrate' && ('from' in d || 'to' in d)) out.push(`версія структури даних: ${num(d.from)} → ${num(d.to)}`);
     if (d.resolution) out.push(esc(RESOLUTION[d.resolution] || d.resolution) + (d.value != null ? ` (${num(d.value)})` : ''));
     if (d.reason) out.push('причина: ' + esc(d.reason));
     if (d.note) out.push('коментар: ' + esc(d.note));
