@@ -110,6 +110,7 @@
     const headers = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (S.token) headers.Authorization = 'Bearer ' + S.token;
+    if (deviceId) headers['X-Device-Id'] = deviceId;
     const ctrl = new AbortController();
     const kill = setTimeout(() => ctrl.abort(), 90000);
     if (++inflight === 1) slowTimer = setTimeout(() => { $('#banner').hidden = false; }, 6000);
@@ -826,8 +827,8 @@
       h += '<div class="rk-bar"><button class="btn small" data-act="ratingManage">Керувати</button></div>';
     }
     if (!d.group) {
-      return h + card(`<div class="next-title">${isAdmin() ? 'Груп ще немає' : 'Вас ще не додано до групи'}</div>
-        <div class="muted">${isAdmin() ? 'Натисніть «Керувати», створіть групу й додайте студентів у рейтинг.' : 'Адміністратор призначить вам групу — і тут з’явиться рейтинг вашої групи. Зайдіть пізніше або оновіть дані.'}</div>`);
+      return h + card(`<div class="next-title">${isAdmin() ? 'Груп ще немає' : (d.unassigned ? 'Пристрій ще не прив’язано до студента' : 'Студента ще немає в рейтингу')}</div>
+        <div class="muted">${isAdmin() ? 'Натисніть «Керувати», створіть групу й додайте студентів у рейтинг.' : (d.unassigned ? 'Адміністратор має відкрити «Учасники та пристрої» й вибрати ваше прізвище у полі «Студент» біля цього пристрою.' : 'Перевірте, чи завантажено актуальну таблицю рейтингу.')}</div>`);
     }
     const ranked = d.entries.filter((e) => e.rank != null);
     const unranked = d.entries.filter((e) => e.rank == null);
@@ -871,10 +872,12 @@
         <div>${!d ? '<span class="muted">Завантаження…</span>' : d.subjects && d.subjects.length
           ? `<div class="muted small">Студентів: ${d.total} · предмети: ${d.subjects.map(esc).join(', ')}</div>`
           : '<span class="muted">Таблицю ще не завантажено</span>'}</div>
-        <label class="row" style="cursor:pointer"><span style="color:var(--accent);font-weight:600">Завантажити таблицю (.xlsx / .xls / .csv)</span>
-          <input type="file" data-chg="ratingFile" accept=".xls,.xlsx,.csv,.txt,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden></label>
+        <div class="row" style="flex-wrap:wrap;gap:8px"><button class="btn small" data-act="ratingSyncNow">Оновити з Google Sheets</button>
+          <label class="row" style="cursor:pointer"><span style="color:var(--accent);font-weight:600">Завантажити файл (.xlsx / .xls / .csv)</span>
+            <input type="file" data-chg="ratingFile" accept=".xls,.xlsx,.csv,.txt,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden></label></div>
         <div class="ratingMsg ${R.msg.cls} small" ${R.msg.text ? '' : 'hidden'}>${esc(R.msg.text)}</div>
-      </div><div class="foot">Перша колонка — ПІБ, далі — бали за кожен предмет (як у вашій таблиці). Новий файл повністю оновлює рейтинг: бали змінюються, нових студентів додано, тих, кого немає у файлі, видалено.</div></div>`;
+        ${d.syncStatus && d.syncStatus.enabled ? `<div class="small ${d.syncStatus.lastError ? 'err' : 'muted'}">Google Sheets: ${d.syncStatus.lastError ? 'помилка синхронізації — ' + esc(d.syncStatus.lastError) : 'автооновлення увімкнено'}${d.syncStatus.lastSuccessAt ? ' · останнє оновлення: ' + esc(new Date(d.syncStatus.lastSuccessAt).toLocaleString('uk-UA')) : ''}</div>` : ''}
+      </div><div class="foot">Перша колонка — ПІБ, далі — бали за кожен предмет. Google-таблиця перевіряється автоматично кожні 5 хвилин; ручне завантаження Excel залишається доступним.</div></div>`;
   }
 
   function openRatingAdmin() {
@@ -947,7 +950,7 @@
   function viewAdmin() {
     return `${ratingUploadBlock()}<div><div class="label gl">Рейтинг і групи</div><div class="list">
         ${tile('ratingManage', 'trophy', 'Керування рейтингом', 'Студенти, бали, групи')}
-        ${tile('users', 'users', 'Групи, учасники й пристрої', 'Призначення груп, ролі, запити на вхід', S.deviceRequests ? badge(String(S.deviceRequests), 'warn') : '')}
+        ${tile('users', 'users', 'Учасники та пристрої', 'Прив’язка студентів, ролі, запити на вхід', S.deviceRequests ? badge(String(S.deviceRequests), 'warn') : '')}
       </div></div>
       ${modBlocks(true)}
       <div><div class="label gl">Оцінки й сповіщення</div><div class="list">
@@ -971,7 +974,7 @@
         ${tile('moderation', 'book', 'Домашнє на підтвердження', 'Перевірка завдань від студентів', q ? badge(String(q), 'warn') : '')}
         ${tile('subjects', 'calendar', 'Предмети й посилання', 'Повні назви, Zoom / Meet')}
         ${tile('teachers', 'users', 'Викладачі', 'ПІБ викладачів у розкладі')}
-        ${isAdmin() && !inAdmin ? tile('users', 'shield', 'Учасники, ролі й пристрої', 'Групи, ролі, запити на вхід', S.deviceRequests ? badge(String(S.deviceRequests), 'warn') : '') : ''}
+        ${isAdmin() && !inAdmin ? tile('users', 'shield', 'Учасники та пристрої', 'Прив’язка студентів, ролі, запити на вхід', S.deviceRequests ? badge(String(S.deviceRequests), 'warn') : '') : ''}
       </div></div>`;
   }
 
@@ -1302,30 +1305,32 @@
   const fWhen = (v) => { const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? `${dayMonth(d)}, ${hm(d)}` : ''; };
 
   function openUsers() {
-    const s = { auto: false, title: 'Учасники й групи', users: null, err: '' };
+    const s = { auto: false, title: 'Учасники та групи', users: null, students: [], groups: [], err: '' };
     s.render = () => {
       if (s.err) return `<div class="err">${esc(s.err)}</div>`;
       if (!s.users) return '<div class="muted">Завантаження…</div>';
       const list = [...s.users].sort((a, b) => (b.pending.length > 0) - (a.pending.length > 0) || a.fullName.localeCompare(b.fullName, 'uk'));
-      return '<div class="muted small">Староста й заступник можуть підтверджувати домашнє та завантажувати розклад. Одна людина може мати кілька пристроїв. Коли вона входить з нового, тут з’являється запит — підтвердіть його, і вхід відбудеться автоматично. Якщо пристрій втрачено — видаліть його зі списку.</div>' +
+      return '<div class="muted small">Оберіть студента рейтингу для облікового запису людини. Прив’язка зберігається за людиною, тому всі її підтверджені пристрої показуватимуть один і той самий рейтинг. Нові пристрої підтверджуються адміністратором.</div>' +
         list.map((u) => card(`
           <div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(u.fullName)}</b>${roleBadge(u)}</div>
-          <label><span class="label">Група</span><select class="field" data-chg="userGroup" data-user="${esc(u.id)}"><option value="" ${!u.group ? 'selected' : ''}>Авто (за таблицею)</option>${(s.groups || []).map((g) => `<option value="${esc(g.name)}" ${u.group === g.name ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>
+          ${u.isAdmin ? '' : `<label><span class="label">Група</span><select class="field" data-chg="userGroup" data-user="${esc(u.id)}"><option value="">Не призначено</option>${(s.groups || []).map((g) => `<option value="${esc(g.name)}" ${u.group === g.name ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>`}
           ${u.isAdmin ? '' : `<label><span class="label">Роль</span><select class="field" data-chg="userRole" data-user="${esc(u.id)}"><option value="" ${!u.role ? 'selected' : ''}>Студент</option><option value="starosta" ${u.role === 'starosta' ? 'selected' : ''}>Староста</option><option value="deputy" ${u.role === 'deputy' ? 'selected' : ''}>Заступник старости</option></select></label>`}
+          ${u.isAdmin ? '' : `<label><span class="label">Студент рейтингу</span><select class="field" data-chg="accountStudent" data-user="${esc(u.id)}"><option value="">Не призначено</option>${(s.students || []).map((st) => `<option value="${esc(st.id)}" ${u.studentId === st.id ? 'selected' : ''}>${esc(st.fullName)}${st.group ? ' · ' + esc(st.group) : ''}</option>`).join('')}</select></label><div class="muted small">${u.studentName ? 'У головному меню показується рейтинг: ' + esc(u.studentName) : 'Оберіть студента — його рейтинг відображатиметься на всіх пристроях цього акаунта.'}</div>`}
           ${u.pending.length ? `<div class="label" style="color:var(--warn)">Запити на новий пристрій</div>` + u.pending.map((p) => `
             <div class="dev"><div class="dn">${esc(p.label)}<div class="muted small">${esc(fWhen(p.requestedAt))}</div></div>
               <div style="display:flex;gap:6px"><button class="btn green small" data-act="devApprove" data-user="${esc(u.id)}" data-key="${esc(p.key)}">Підтвердити</button>
               <button class="btn red small" data-act="devReject" data-user="${esc(u.id)}" data-key="${esc(p.key)}">Ні</button></div></div>`).join('') : ''}
           <div class="label">Пристрої (${u.devices})</div>
           ${u.deviceList.length ? u.deviceList.map((d) => `
-            <div class="dev"><div class="dn">${esc(d.label)}${d.addedAt ? `<div class="muted small">додано ${esc(fWhen(d.addedAt))}</div>` : ''}</div>
+            <div class="dev"><div class="dn">${esc(d.label)}${d.addedAt ? `<div class="muted small">додано ${esc(fWhen(d.addedAt))}</div>` : ''}
+              <div class="muted small">Пристрій належить обліковому запису ${esc(u.fullName)}. Рейтинг задається вище для всієї людини.</div></div>
               <button class="btn deep small" data-act="devRemove" data-user="${esc(u.id)}" data-key="${esc(d.key)}" data-name="${esc(u.fullName)}">Видалити</button></div>`).join('')
             : '<div class="muted small">Немає — перший пристрій, з якого людина увійде, стане основним.</div>'}
           <div class="btn-row">${u.devices > 1 ? `<button class="btn deep" data-act="resetDevices" data-id="${esc(u.id)}">Відв’язати всі</button>` : ''}
             ${u.id !== S.user.id ? `<button class="btn red" data-act="deleteUser" data-id="${esc(u.id)}" data-name="${esc(u.fullName)}">Видалити людину</button>` : ''}</div>`, u.pending.length ? 'pending-box' : '')).join('');
     };
     s.reload = async () => {
-      try { [s.users, s.groups] = await Promise.all([api('GET', '/api/admin/users'), api('GET', '/api/admin/groups')]); s.err = ''; } catch (e) { s.err = e.message; }
+      try { [s.users, s.students, s.groups] = await Promise.all([api('GET', '/api/admin/users'), api('GET', '/api/admin/rating-students'), api('GET', '/api/admin/groups')]); s.err = ''; } catch (e) { s.err = e.message; }
       if (sheets.includes(s)) rerender(s);
     };
     openSheet(s);
@@ -1594,6 +1599,7 @@
     go(el) { ACT.tab(el); },
     back() { S.tab = 'admin'; render(); },
     ratingReload() { loadRating(); },
+    async ratingSyncNow() { try { toast('Оновлюю рейтинг…'); await api('POST', '/api/admin/rating/sync', {}); await loadRating(undefined, true); toast('Рейтинг оновлено з Google Sheets'); } catch (e) { toast(e.message || 'Помилка синхронізації'); } },
     ratingManage() { openRatingAdmin(); },
     ratingJump() { const r = $('#rk-me'); if (r) r.scrollIntoView({ block: 'center', behavior: 'smooth' }); },
     theme(el) { LS.set('theme', el.dataset.mode); if (window.__applyTheme) window.__applyTheme(); render(); },
@@ -1907,10 +1913,20 @@
     } else if (el.dataset.chg === 'hwDue') {
       const s = sheetOf(el);
       if (s && s.item) hwRefreshDue(s);
+    } else if (el.dataset.chg === 'userGroup') {
+      const s = sheetOf(el);
+      api('POST', `/api/admin/users/${encodeURIComponent(el.dataset.user)}/group`, { group: el.value })
+        .then(() => { toast('Групу змінено'); if (s && s.reload) s.reload(); })
+        .catch((e) => { toast(e.message); if (s && s.reload) s.reload(); });
     } else if (el.dataset.chg === 'userRole') {
       const s = sheetOf(el);
       api('POST', `/api/admin/users/${encodeURIComponent(el.dataset.user)}/role`, { role: el.value })
         .then(() => { toast('Роль змінено'); if (s && s.reload) s.reload(); })
+        .catch((e) => { toast(e.message); if (s && s.reload) s.reload(); });
+    } else if (el.dataset.chg === 'accountStudent') {
+      const s = sheetOf(el);
+      api('POST', `/api/admin/users/${encodeURIComponent(el.dataset.user)}/student`, { studentId: el.value })
+        .then(() => { toast(el.value ? 'Рейтинг студента призначено' : 'Прив’язку до рейтингу знято'); if (s && s.reload) s.reload(); })
         .catch((e) => { toast(e.message); if (s && s.reload) s.reload(); });
     } else if (el.dataset.chg === 'ratingGroup') {
       loadRating(el.value);
@@ -1923,11 +1939,6 @@
       importRating(f);
     } else if (el.dataset.chg === 'ratingPts') {
       ratingSavePts(el);
-    } else if (el.dataset.chg === 'userGroup') {
-      const s = sheetOf(el);
-      api('POST', `/api/admin/users/${encodeURIComponent(el.dataset.user)}/group`, { group: el.value })
-        .then(() => { toast(el.value ? 'Групу призначено' : 'Групу знято'); if (s && s.reload) s.reload(); S.rating.data = null; })
-        .catch((e) => { toast(e.message); if (s && s.reload) s.reload(); });
     } else if (el.dataset.chg === 'notifyField') {
       S.notify[el.dataset.key] = el.value;
     } else if (el.dataset.chg === 'hwImages' && el.files && el.files.length) {
