@@ -1,0 +1,23 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "navsstudents": {
+      "root": ".",
+      "framework": "node",
+      "runtime": "node",
+      "buildCommand": "npm install --omit=dev"
+    },
+    "project": {
+      "root": "project",
+      "framework": "fastapi"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "navsstudents"
+      }
+    }
+  ]
+}
