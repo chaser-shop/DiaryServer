@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#050b18">
+<meta name="theme-color" content="#0b0c0e">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" rel="stylesheet">
 <title>Електронний щоденник — НАВС</title>
 <style>
 :root{
@@ -224,70 +227,96 @@ dialog::backdrop{background:rgba(2,6,14,.72)}dialog h2{margin:0 0 16px;font-size
 input[readonly]{opacity:.7}
 @media (max-width:700px){.stats3{grid-template-columns:1fr}.dgrid,.pgrid{grid-template-columns:1fr}#adm{padding:calc(12px + env(safe-area-inset-top,0px)) calc(12px + env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) calc(12px + env(safe-area-inset-left,0px))}.abrand b{font-size:1rem}}
 
-/* ===== Поліцейський щоденник: службова тема дашборду ===== */
-:root{--gold:#d9b04a;--gold2:#f0cf7a;--navy:#081327;--rule:rgba(217,176,74,.07);--mono:ui-monospace,"SF Mono",Consolas,"Courier New",monospace}
-body.in-dash{background:repeating-linear-gradient(135deg,rgba(217,176,74,.03) 0 2px,transparent 2px 14px),radial-gradient(ellipse 60% 50% at 75% 0%,rgba(30,80,190,.3),transparent 70%),var(--navy)}
-:is(#dash,#adm) :is(.panel,.side,.top,.stat){background:repeating-linear-gradient(180deg,transparent 0 31px,var(--rule) 31px 32px),linear-gradient(180deg,#0e1e3b,#0a1530);border:1px solid rgba(217,176,74,.38);border-radius:6px;box-shadow:0 10px 28px rgba(0,0,0,.4),inset 0 0 0 4px #0a1530,inset 0 0 0 5px rgba(217,176,74,.18)}
-/* обкладинка: отвори під кільця блокнота */
-#dash .side{position:sticky;padding-left:26px}
-#dash .side::before{content:"";position:absolute;left:7px;top:22px;bottom:22px;width:10px;background:radial-gradient(circle,#050b18 0 3.5px,rgba(217,176,74,.55) 4px 5px,transparent 5.5px) 0 0/10px 34px repeat-y}
-.dlogo{filter:drop-shadow(0 0 14px rgba(217,176,74,.45))}
-#dash .brand b{font-family:var(--mono);letter-spacing:.2em;color:var(--gold2)}
-#dash .brand span{font-family:var(--mono);text-transform:uppercase;font-size:.7rem;letter-spacing:.14em}
-#dash #nav button,#dash .logout{font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;font-size:.88rem;border-radius:4px}
-#dash #nav button.on{color:var(--gold2);background:linear-gradient(90deg,rgba(217,176,74,.22),rgba(217,176,74,.03));border-color:rgba(217,176,74,.6);box-shadow:inset 3px 0 0 var(--gold)}
-#dash #nav button:hover,#dash .logout:hover{background:rgba(217,176,74,.1)}
-/* верхня панель зі стрічкою */
-#dash .top{position:relative;padding-top:20px}
-#dash .top::before{content:"";position:absolute;left:0;right:0;top:0;height:7px;border-radius:6px 6px 0 0;background:repeating-linear-gradient(-45deg,var(--gold) 0 12px,#0a1530 12px 24px)}
-#dash .crumb{font-family:var(--mono);text-transform:uppercase;letter-spacing:.12em;color:var(--gold2);font-size:1rem}
-#dash .ib{border-radius:4px;border-color:rgba(217,176,74,.45);color:var(--gold2)}
-#dash .ib:hover{border-color:var(--gold)}
-/* заголовок сторінки */
-#dash .folio{display:flex;align-items:center;gap:10px;margin-bottom:14px;font:700 .72rem var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--gold)}
-#dash .folio svg.i{width:16px;height:16px;fill:var(--gold);stroke:none}
-#dash .folio i{flex:1;height:1px;opacity:.6;background:repeating-linear-gradient(90deg,var(--gold) 0 6px,transparent 6px 10px)}
-#dash .date{font-family:var(--mono);text-transform:uppercase;letter-spacing:.12em;color:var(--gold2);background:rgba(217,176,74,.08);border:2px solid var(--gold);border-radius:4px;transform:rotate(-1.5deg)}
-#dash .hi{font-family:var(--mono);letter-spacing:-.01em}
-#dash .chip{font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;font-size:.9rem;color:var(--gold2);background:rgba(217,176,74,.08);border:1px solid var(--gold);border-radius:4px}
-/* картки показників з номерами, як бирки */
-#dash .stats{counter-reset:st}
-#dash .stat{counter-increment:st;position:relative;padding-top:28px}
-#dash .stat::before{content:"№ 0" counter(st);position:absolute;top:9px;right:14px;font:700 .68rem var(--mono);letter-spacing:.14em;color:var(--gold);opacity:.85}
-#dash .stat small{font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;font-size:.72rem}
-#dash .stat strong{font-family:var(--mono);color:var(--gold2)}
-#dash .stat strong em{color:var(--muted)}
-#dash .sic{border-radius:50%;color:var(--gold2);border:2px solid var(--gold);background:radial-gradient(circle at 35% 30%,#2a4fa0,#10244f)}
-#dash .pill{font-family:var(--mono);font-size:.76rem;color:var(--gold2);background:rgba(217,176,74,.1);border:1px solid rgba(217,176,74,.5);border-radius:3px}
-/* заголовки розділів і штампи */
-#dash .panel h2{display:flex;align-items:center;gap:10px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;font-size:1.05rem;color:var(--gold2)}
-#dash .panel h2::before{content:"";width:10px;height:10px;flex:none;background:var(--gold);transform:rotate(45deg)}
-#dash .tag{font-family:var(--mono);text-transform:uppercase;letter-spacing:.12em;font-size:.76rem;color:var(--gold2);border:2px dashed var(--gold);border-radius:3px;transform:rotate(-1deg)}
-#dash .tag.done{color:#8cf0b0;border-color:#4ade80}
-#dash .lesson h3{font-family:var(--mono);letter-spacing:.06em;color:var(--gold2)}
-#dash .ava{font-family:var(--mono);color:var(--gold2);background:#14306a;border:2px solid var(--gold)}
-#dash .meta span{font-family:var(--mono);font-size:.88rem;background:transparent;border:1px dashed rgba(217,176,74,.5);border-radius:4px}
-#dash .hwq{font-family:var(--mono);font-size:1.1rem}
+
+/* ===== Щоденник: мінімалістична тема ===== */
+body{font-family:"Onest",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body.in-dash{background:#0b0c0e}
+body.in-dash:has(#dash:not([hidden]))::before{content:"";position:fixed;inset:0 0 auto;height:3px;z-index:30;background:linear-gradient(90deg,#3b7bff 50%,#e5484d 50%)}
+#dash{--s:#121417;--b:#23262c;--t:#e8eaed;--m:#8b919a;--a:#3b7bff;font:14px/1.5 "Onest",system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--t);-webkit-font-smoothing:antialiased;grid-template-columns:184px minmax(0,1fr);gap:28px;max-width:1080px;margin:0 auto;padding:calc(28px + env(safe-area-inset-top,0px)) 20px 28px}
+#dash svg.i{width:18px;height:18px;stroke-width:1.6}
+#dash :is(.panel,.side,.top,.stat){background:none;border:0;border-radius:0;box-shadow:none}
+#dash :is(.panel,.stat){background:var(--s);border:1px solid var(--b);border-radius:12px}
+#dash .panel{padding:18px}
+#dash .sic{display:none}
+/* меню */
+#dash .side{position:sticky;top:28px;height:auto;align-self:start;padding:0}
+#dash .dlogo{width:34px;max-width:none;margin:0 0 10px;filter:none}
+#dash .brand{text-align:left;margin:0 0 24px}
+#dash .brand b{font-size:15px;font-weight:650;letter-spacing:.02em}
+#dash .brand span{font-size:12px;color:var(--m)}
+#dash #nav{gap:2px}
+#dash #nav button,#dash .logout{padding:8px 10px;gap:10px;border:0;border-radius:8px;font-size:14px;font-weight:500;color:var(--m)}
+#dash #nav button:hover,#dash .logout:hover{background:#17191d;color:var(--t)}
+#dash #nav button.on{background:#17191d;color:var(--t);box-shadow:none}
+#dash #nav button.on svg{color:var(--a)}
+#dash .logout{margin-top:16px}
+/* верх */
+#dash .main{gap:16px}
+#dash .top{padding:0;min-height:36px;gap:8px}
+#dash .crumb{font-size:15px;font-weight:600}
+#dash .crumb svg{display:none}
+#dash .ib{width:34px;height:34px;border-radius:8px;background:none;border:1px solid var(--b);color:var(--m)}
+#dash .ib:hover{color:var(--t);border-color:#3a3f48}
+#dash #badge{top:-5px;right:-5px;min-width:16px;height:16px;border-radius:8px;font-size:10px;line-height:16px;font-weight:600;padding:0 4px}
+#dash .date{padding:0;border:0;border-radius:0;background:none;transform:none;color:var(--m);font-size:13px;font-weight:400}
+#dash .hirow{margin-top:2px;gap:4px 12px}
+#dash .hi{font-size:24px;font-weight:600;letter-spacing:-.02em}
+#dash .chip{padding:0;border:0;background:none;color:var(--m);font-size:13px;gap:6px}
+/* показники */
+#dash .stats{gap:10px}
+#dash .stat{padding:14px 16px;gap:0}
+#dash .stat small{font-size:12px;color:var(--m)}
+#dash .stat strong{margin-top:2px;font-size:26px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+#dash .stat strong em{font-size:13px;font-weight:400}
+#dash .pill{margin:2px 0 0;padding:0;border:0;background:none;color:#4cc38a;font-size:12px}
+/* панелі */
+#dash :is(.cols,.stack){gap:16px}
+#dash .panel h2{margin:0 0 12px;font-size:14px;font-weight:600}
+#dash .subhead{margin-bottom:6px}
+#dash .tag{padding:0;border:0;border-radius:0;background:none;transform:none;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--a)}
+#dash .tag.done{color:var(--m)}
+#dash .tag.done::before{width:6px;height:6px;margin-right:6px;background:#4cc38a}
+#dash .lesson{margin:10px 0 12px;gap:0}
+#dash .lesson h3{font-size:20px;font-weight:600}
+#dash .teacher{gap:8px;margin-top:2px;font-size:13px;font-weight:400;color:var(--m)}
+#dash .ava{width:24px;height:24px;border:0;background:#1e2430;color:#9db7ff;font-size:10px}
+#dash .meta{gap:8px;margin-bottom:14px}
+#dash .meta span{gap:6px;padding:5px 10px;border:1px solid var(--b);border-radius:8px;background:none;color:var(--m);font-size:12.5px}
+#dash .meta svg{width:15px;height:15px}
+#dash .hwq{margin:10px 0 14px;font-size:14px;font-weight:500;line-height:1.45}
+#dash :is(.det,.hwres){margin:12px 0 0;color:var(--m);font-size:13px}
 /* кнопки */
-#dash .btn{font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;font-size:.88rem;border-radius:4px;border:1px solid rgba(217,176,74,.5);background:rgba(217,176,74,.06)}
-#dash .btn:hover{border-color:var(--gold)}
-#dash .btn.b-green,#dash .btn.b-vio{color:#1a1405;background:linear-gradient(180deg,var(--gold2),#c99a2c);border-color:var(--gold2);box-shadow:0 4px 0 #7a5d1a,0 8px 18px rgba(0,0,0,.4)}
-#dash .btn.b-green:active,#dash .btn.b-vio:active{transform:translateY(3px);box-shadow:0 1px 0 #7a5d1a}
-#dash #all{border-radius:4px!important}
-/* успішність: шкала-лінійка */
-#dash .sr{font-family:var(--mono);border-bottom:1px dashed rgba(217,176,74,.2)}
-#dash .sc{color:var(--gold2)}
-#dash .tr{height:12px;border-radius:2px;background:repeating-linear-gradient(90deg,rgba(255,255,255,.09) 0 6px,transparent 6px 8px)}
-#dash .fl{border-radius:0;background:repeating-linear-gradient(90deg,var(--gold) 0 6px,transparent 6px 8px)}
-#dash .warn{font-size:.92rem;border:1px solid #c94b4b;border-left:5px solid #e04b4b;background:rgba(224,75,75,.08);border-radius:3px}
-#dash .warn svg{color:#ff6b6b}
-/* форми й нотатки */
-#dash :is(input,select,textarea){border-radius:4px;border-color:rgba(217,176,74,.38)}
-#dash :is(input,select,textarea):focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(217,176,74,.22)}
-#dash label{font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;font-size:.76rem}
-#dash textarea{font-family:var(--mono);line-height:28px;background-attachment:local;background-image:repeating-linear-gradient(180deg,transparent 0 27px,rgba(217,176,74,.2) 27px 28px)}
-.toast{font-family:var(--mono);border-color:var(--gold);border-radius:4px}
-@media (max-width:900px){#dash .side{padding-left:12px}#dash .side::before{display:none}}
+#dash .btns{gap:8px}
+#dash .btn{min-height:34px;padding:0 14px;gap:6px;border:1px solid var(--b);border-radius:8px;background:none;box-shadow:none;color:var(--t);font-size:13px;font-weight:500}
+#dash .btn svg{width:16px;height:16px}
+#dash .btn:hover{border-color:#3a3f48;background:#17191d}
+#dash .btn.b-green,#dash .btn.b-vio{background:var(--a);border-color:var(--a);color:#fff}
+#dash .btn.b-green:hover,#dash .btn.b-vio:hover{background:var(--a);filter:brightness(1.12)}
+#dash #all{min-height:30px!important;padding:0 10px;border-radius:8px!important}
+/* бали */
+#dash .sr{grid-template-columns:56px 36px 1fr 28px;gap:12px;padding:7px 0;font-size:13px}
+#dash .sr b{font-weight:500}
+#dash .pc{color:var(--m);font-size:12px}
+#dash .sc{font-variant-numeric:tabular-nums}
+#dash .tr{height:4px;border-radius:2px;background:var(--b)}
+#dash .fl{border-radius:2px;background:var(--a)}
+#dash .warn{gap:10px;margin-top:14px;padding:10px 12px;border:1px solid var(--b);border-radius:8px;background:none;color:var(--m);font-size:12.5px;font-weight:400}
+#dash .warn svg{width:18px!important;height:18px!important;color:var(--m)}
+/* форми */
+#dash :is(input,select,textarea){height:38px;padding:0 12px;border:1px solid var(--b);border-radius:8px;background:#0e1013;font-size:14px}
+#dash textarea{height:auto;min-height:72px;margin-top:10px;padding:10px 12px}
+#dash :is(input,select,textarea):focus{border-color:var(--a);box-shadow:0 0 0 3px rgba(59,123,255,.18)}
+#dash label{margin-bottom:5px;color:var(--m);font-size:12px;font-weight:500}
+#dash .field{margin-bottom:12px}
+.toast{padding:9px 14px;border:1px solid #2d3139;border-radius:8px;background:#1a1d22;font-size:13px}
+@media (max-width:900px){
+ #dash{grid-template-columns:1fr;gap:16px;padding:calc(16px + env(safe-area-inset-top,0px)) 14px 20px}
+ #dash .side{position:static;display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px 12px}
+ #dash .dlogo{width:28px;margin:0}#dash .brand{margin:0}
+ #dash #nav{order:3;width:100%;flex-direction:row;overflow-x:auto}
+ #dash #nav button{width:auto;white-space:nowrap}
+ #dash .logout{width:auto;margin:0 0 0 auto}
+}
 </style>
 </head>
 <body>
@@ -374,7 +403,7 @@ body.in-dash{background:repeating-linear-gradient(135deg,rgba(217,176,74,.03) 0 
   </header>
 
   <div id="v-home" class="main">
-   <div><div class="folio"><svg class="i" viewBox="0 0 24 24"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.6 1.5 6.8L12 16.9 5.8 20.4l1.5-6.8L2.2 9l6.9-.7z"/></svg><span>Службовий щоденник курсанта</span><i></i><span>Запис за добу</span></div><span class="date" id="date"></span>
+   <div><span class="date" id="date"></span>
     <div class="hirow"><div class="hi" id="hi">Привіт!</div><span class="chip"><svg class="i" data-i="shield"></svg><span id="grp"></span></span></div></div>
 
    <div class="stats">
