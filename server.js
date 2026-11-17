@@ -1465,4 +1465,25 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref(); });
 }
 
-module.exports = { start, stop, init, server, progressTick, ctx };
+/**
+ * Експорт — функція-обробник запиту: так її очікує Vercel («default export must be a function or server»),
+ * коли сам визначає server.js як точку входу. Решта (start, stop, …) — властивості цієї функції,
+ * тож `require('./server').start()` у тестах і скриптах працює як раніше.
+ * На Vercel немає фонових задач (сповіщення, синхронізація з Google-таблицею); основний хостинг — Render.
+ */
+let ready = null;
+async function handler(req, res) {
+  if (!ready) ready = init().catch((e) => { ready = null; throw e; });
+  try {
+    await ready;
+  } catch (e) {
+    console.error('Не вдалося ініціалізувати сервер:', e);
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.end(`Сервер не запустився: ${e.message}`);
+    return;
+  }
+  server.emit('request', req, res);
+}
+
+module.exports = Object.assign(handler, { start, stop, init, server, progressTick, ctx });
