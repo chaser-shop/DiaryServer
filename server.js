@@ -1417,13 +1417,18 @@ const server = http.createServer((req, res) => {
 const timers = [];
 
 /** Запускає сервер. Тести викликають start({ port: 0, schedulers: false }). */
-async function start({ port = PORT, schedulers = true } = {}) {
+/** Підключення до бази й налаштування без прослуховування порту (використовує і start(), і адаптер Vercel). */
+async function init() {
   if (!MONGODB_URI) throw new Error('Не задано MONGODB_URI. Додайте змінну середовища з рядком підключення до MongoDB.');
   VAPID_PUBLIC = await initDb();
   sync.configure(process.env);
   ctx.sendPush = sendPush;
   ctx.claim = claim;
   await ensureGradesBaseline().catch((e) => console.error('ensureGradesBaseline:', e));
+}
+
+async function start({ port = PORT, schedulers = true } = {}) {
+  await init();
   await new Promise((resolve) => server.listen(port, resolve));
   console.log(`Щоденник: сервер слухає порт ${server.address().port}${ctx.txn ? ' (транзакції MongoDB увімкнено)' : ''}`);
   if (schedulers) {
@@ -1460,4 +1465,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref(); });
 }
 
-module.exports = { start, stop, progressTick, ctx };
+module.exports = { start, stop, init, server, progressTick, ctx };
