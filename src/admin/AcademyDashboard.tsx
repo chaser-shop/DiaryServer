@@ -43,6 +43,16 @@ import {
   updateGrade,
   type CreatedStudent,
 } from './adminApi'
+import { ScheduleUploadCard, SessionDateCard, SubjectLinksCard } from './GroupParams'
+import {
+  addDays,
+  isRemote,
+  kyivNow,
+  mondayOf,
+  shortDate,
+  type GroupSchedule,
+  type SubjectLink,
+} from '../schedule'
 
 export type AcademyGroup = {
   id: string
@@ -52,6 +62,12 @@ export type AcademyGroup = {
   academicYear: string
   curator: string
   status: string
+  /** YYYY-MM-DD — початок сесії, задає адміністратор у параметрах групи */
+  sessionStart?: string | null
+  /** Посилання, куди приєднуватись на пари, за предметами */
+  subjectLinks?: SubjectLink[]
+  /** Розклад, завантажений з Excel */
+  schedule?: GroupSchedule | null
 }
 
 export type StudentRow = {
@@ -230,6 +246,20 @@ export default function AcademyDashboard({
   const currentRank = currentStudent
     ? groupGrades.findIndex((row) => row.id === currentStudent.id) + 1
     : 0
+
+  function flash(text: string) {
+    setNotice(text)
+    window.setTimeout(() => setNotice(''), 2800)
+  }
+
+  function replaceGroup(group: AcademyGroup) {
+    setGroups((items) => items.map((item) => (item.id === group.id ? group : item)))
+  }
+
+  function openGroupSettings() {
+    setGroupTab('settings')
+    setSection('groups')
+  }
 
   function goTo(id: Section) {
     setSection(id)
@@ -470,9 +500,9 @@ export default function AcademyDashboard({
                           }
                         : section === 'schedule'
                           ? {
-                              label: 'Імпортувати розклад',
+                              label: 'Завантажити розклад',
                               icon: Upload,
-                              onClick: () => setModal('import'),
+                              onClick: openGroupSettings,
                             }
                           : undefined
                   }
@@ -494,11 +524,11 @@ export default function AcademyDashboard({
                     tab={groupTab}
                     setTab={setGroupTab}
                     grades={groupGrades}
-                    lessons={initialLessons.filter((lesson) => lesson.groupId === selectedGroupId)}
                     updateScore={updateScore}
                     onArchive={() => setConfirm('archive')}
                     onDelete={() => setConfirm('delete')}
-                    onImport={() => setModal('import')}
+                    onGroupSaved={replaceGroup}
+                    notify={flash}
                   />
                 )}
                 {section === 'students' && (
@@ -528,9 +558,10 @@ export default function AcademyDashboard({
                 )}
                 {section === 'schedule' && (
                   <ScheduleSection
-                    lessons={initialLessons}
                     group={selectedGroup}
-                    onImport={() => setModal('import')}
+                    groups={groups}
+                    onSelectGroup={setSelectedGroupId}
+                    onOpenSettings={openGroupSettings}
                   />
                 )}
                 {section === 'analytics' && (
@@ -875,11 +906,11 @@ function GroupsSection({
   tab,
   setTab,
   grades,
-  lessons,
   updateScore,
   onArchive,
   onDelete,
-  onImport,
+  onGroupSaved,
+  notify,
 }: {
   groups: AcademyGroup[]
   selectedGroup?: AcademyGroup
@@ -887,11 +918,11 @@ function GroupsSection({
   tab: GroupTab
   setTab: (tab: GroupTab) => void
   grades: GradeRow[]
-  lessons: LessonRow[]
   updateScore: (id: string, key: SubjectKey, value: number) => void
   onArchive: () => void
   onDelete: () => void
-  onImport: () => void
+  onGroupSaved: (group: AcademyGroup) => void
+  notify: (text: string) => void
 }) {
   if (selectedGroup && tab !== 'overview') {
     return (
@@ -936,9 +967,10 @@ function GroupsSection({
           <RankingTable rows={grades} group={selectedGroup} updateScore={updateScore} />
         )}
         {tab === 'schedule' && (
-          <ScheduleSection lessons={lessons} group={selectedGroup} onImport={onImport} />
+          <ScheduleSection group={selectedGroup} onOpenSettings={() => setTab('settings')} />
         )}
         {tab === 'settings' && (
+          <>
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-2xl border border-white/7 bg-white/[.025] p-5">
               <p className="text-sm font-semibold">Параметри групи</p>
@@ -965,6 +997,30 @@ function GroupsSection({
               </div>
             </div>
           </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <SessionDateCard
+              key={`session-${selectedGroup.id}`}
+              group={selectedGroup}
+              onSaved={onGroupSaved}
+              notify={notify}
+            />
+            <ScheduleUploadCard
+              key={`schedule-${selectedGroup.id}`}
+              group={selectedGroup}
+              onSaved={onGroupSaved}
+              notify={notify}
+            />
+          </div>
+          <div className="mt-4">
+            <SubjectLinksCard
+              key={`links-${selectedGroup.id}`}
+              group={selectedGroup}
+              knownSubjects={subjects}
+              onSaved={onGroupSaved}
+              notify={notify}
+            />
+          </div>
+          </>
         )}
       </div>
     )
@@ -1592,61 +1648,141 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
   )
 }
 
+const weekdayNames = ['Понеділок', 'Вівторок', 'Середа', 'Четвер', 'П’ятниця', 'Субота', 'Неділя']
+
 function ScheduleSection({
-  lessons,
   group,
-  onImport,
+  groups,
+  onSelectGroup,
+  onOpenSettings,
 }: {
-  lessons: LessonRow[]
   group?: AcademyGroup
-  onImport: () => void
+  groups?: AcademyGroup[]
+  onSelectGroup?: (id: string) => void
+  onOpenSettings: () => void
 }) {
-  const days = ['Понеділок', 'Вівторок', 'Середа', 'Четвер', 'П’ятниця']
+  const lessons = useMemo(() => group?.schedule?.lessons ?? [], [group?.schedule])
+  const weeks = useMemo(
+    () => Array.from(new Set(lessons.map((lesson) => mondayOf(lesson.date)))).sort(),
+    [lessons],
+  )
+  const today = kyivNow().date
+  const currentWeek = weeks.findIndex((monday) => addDays(monday, 6) >= today)
+  const defaultWeek = currentWeek === -1 ? Math.max(0, weeks.length - 1) : currentWeek
+  const [picked, setPicked] = useState<{ groupId: string; index: number } | null>(null)
+  const weekIndex = Math.min(
+    picked && picked.groupId === group?.id ? picked.index : defaultWeek,
+    Math.max(0, weeks.length - 1),
+  )
+  const monday = weeks[weekIndex]
+  const links = new Set((group?.subjectLinks ?? []).map((link) => link.key))
+
+  const heading = (
+    <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <p className="text-sm font-semibold">Розклад {group?.name}</p>
+        <p className="mt-1 text-[10px] text-slate-600">
+          {group?.schedule
+            ? `${group.schedule.fileName}${group.schedule.period ? ` · ${group.schedule.period}` : ''}`
+            : 'Розклад не завантажено'}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {groups && groups.length > 1 && onSelectGroup && (
+          <select
+            value={group?.id}
+            onChange={(event) => onSelectGroup(event.target.value)}
+            aria-label="Група"
+            className="rounded-xl border border-white/7 bg-[#0b1d35] px-3 py-2 text-[10px] text-slate-300 outline-none"
+          >
+            {groups.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+        )}
+        <button
+          onClick={onOpenSettings}
+          className="flex items-center gap-2 rounded-xl border border-white/7 px-3 py-2 text-[10px] text-slate-400 hover:text-white"
+        >
+          <Upload size={13} /> {group?.schedule ? 'Замінити з Excel' : 'Завантажити з Excel'}
+        </button>
+      </div>
+    </div>
+  )
+
+  if (!group?.schedule || !monday) {
+    return (
+      <section>
+        {heading}
+        <EmptyState
+          title="Розклад ще не завантажено"
+          description="Завантажте Excel-файл у параметрах групи — після цього студенти побачать «Наступну пару»."
+        />
+      </section>
+    )
+  }
+
+  const days = weekdayNames
+    .map((name, index) => ({ name, date: addDays(monday, index) }))
+    .filter((day, index) => index < 5 || lessons.some((lesson) => lesson.date === day.date))
+
   return (
     <section>
-      <div className="mb-4 flex flex-wrap justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold">Тижневий розклад {group?.name}</p>
-          <p className="mt-1 text-[10px] text-slate-600">17–21 березня 2050</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={onImport}
-            className="flex items-center gap-2 rounded-xl border border-white/7 px-3 py-2 text-[10px] text-slate-400"
-          >
-            <Upload size={13} /> Замінити з Excel / CSV
-          </button>
-          <button className="flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-[10px] font-semibold">
-            <Plus size={13} /> Додати заняття
-          </button>
-        </div>
+      {heading}
+      <div className="mb-3 flex items-center gap-2">
+        <button
+          disabled={weekIndex === 0}
+          onClick={() => setPicked({ groupId: group.id, index: weekIndex - 1 })}
+          className="rounded-xl border border-white/7 px-3 py-2 text-[10px] text-slate-400 disabled:opacity-30"
+        >
+          ← Попередній
+        </button>
+        <p className="min-w-40 text-center text-[11px] font-semibold">
+          {shortDate(monday)} – {shortDate(addDays(monday, 6))}
+        </p>
+        <button
+          disabled={weekIndex >= weeks.length - 1}
+          onClick={() => setPicked({ groupId: group.id, index: weekIndex + 1 })}
+          className="rounded-xl border border-white/7 px-3 py-2 text-[10px] text-slate-400 disabled:opacity-30"
+        >
+          Наступний →
+        </button>
       </div>
-      <div className="grid gap-3 xl:grid-cols-5">
+      <div className={`grid gap-3 ${days.length > 5 ? 'xl:grid-cols-7' : 'xl:grid-cols-5'}`}>
         {days.map((day) => {
-          const items = lessons.filter((lesson) => lesson.day === day)
+          const items = lessons.filter((lesson) => lesson.date === day.date)
           return (
-            <div key={day} className="rounded-2xl border border-white/7 bg-white/[.02] p-3">
+            <div key={day.date} className="rounded-2xl border border-white/7 bg-white/[.02] p-3">
               <div className="mb-3 flex items-center justify-between px-1">
-                <p className="text-[11px] font-semibold">{day}</p>
+                <div>
+                  <p className="text-[11px] font-semibold">{day.name}</p>
+                  <p className="text-[9px] text-slate-600">{shortDate(day.date)}</p>
+                </div>
                 <span className="text-[9px] text-slate-700">{items.length} зан.</span>
               </div>
               <div className="space-y-2">
                 {items.map((lesson) => (
                   <article
-                    key={lesson.id}
+                    key={`${lesson.date}-${lesson.start}-${lesson.subjectKey}-${lesson.detail}`}
                     className="rounded-xl border border-white/6 bg-gradient-to-br from-blue-500/[.07] to-transparent p-3"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[9px] font-semibold text-blue-300">{lesson.time}</span>
-                      <button className="text-slate-700">
-                        <MoreHorizontal size={14} />
-                      </button>
-                    </div>
-                    <p className="mt-3 text-[11px] font-semibold leading-4">{lesson.subject}</p>
+                    <span className="text-[9px] font-semibold text-blue-300">
+                      {lesson.start}–{lesson.end}
+                    </span>
+                    <p className="mt-2 text-[11px] font-semibold leading-4">{lesson.subject}</p>
                     <p className="mt-2 text-[9px] text-slate-600">
-                      {lesson.lessonType} · {lesson.location}
+                      {lesson.kind || 'Заняття'}
+                      {lesson.detail ? ` ${lesson.detail}` : ''} ·{' '}
+                      {isRemote(lesson.room) ? 'дистанційно' : lesson.room || '—'}
                     </p>
                     <p className="mt-1 text-[9px] text-slate-700">{lesson.teacher}</p>
+                    <p
+                      className={`mt-2 text-[9px] ${links.has(lesson.subjectKey) ? 'text-emerald-300/80' : 'text-amber-300/70'}`}
+                    >
+                      {links.has(lesson.subjectKey) ? 'Посилання додано' : 'Немає посилання'}
+                    </p>
                   </article>
                 ))}
                 {!items.length && (

@@ -834,6 +834,21 @@
   color: var(--stat-accent);
 }
 
+.rank-mark {
+  display: grid;
+  min-width: 25px;
+  height: 22px;
+  place-items: center;
+  border-top: 2px solid var(--stat-accent);
+  border-radius: 4px;
+  padding: 0 6px;
+  background: rgba(165, 149, 237, 0.1);
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--stat-accent);
+  font-variant-numeric: tabular-nums;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(330px, 0.75fr);
@@ -1030,6 +1045,41 @@
     rgba(104, 164, 233, 0.32),
     rgba(104, 164, 233, 0.11)
   );
+}
+
+.class-empty-text {
+  max-width: 360px;
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: #7e93aa;
+}
+
+.timeline-caption {
+  margin-bottom: -6px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7ea9dc;
+}
+
+.timeline-list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.timeline-list .timeline-line {
+  top: 9px;
+  bottom: 9px;
+  left: 8px;
+}
+
+.timeline-empty {
+  font-size: 10px;
+  color: #687d93;
 }
 
 .timeline-event {

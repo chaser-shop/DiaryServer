@@ -31,8 +31,32 @@ import {
 } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import Rating from "./Rating";
-import { fetchMyScores, saveMyScore } from "./ratingApi";
-import { averageScore, formatAverage, SUBJECTS, type Scores, type SubjectKey } from "./subjects";
+import { fetchGroupInfo, fetchGroupRatings, fetchMyScores, saveMyScore } from "./ratingApi";
+import {
+  countdownParts,
+  dayLabel,
+  daysBetween,
+  findNextLesson,
+  isRemote,
+  kindLabel,
+  kyivNow,
+  lessonDuration,
+  lessonsOnDate,
+  lessonState,
+  longDate,
+  pluralUk,
+  type GroupInfo,
+  type Lesson,
+  type WallClock,
+} from "./schedule";
+import {
+  averageScore,
+  formatAverage,
+  groupRank,
+  SUBJECTS,
+  type Scores,
+  type SubjectKey,
+} from "./subjects";
 
 export type SessionUser = { login: string; name: string; role?: string; group?: string };
 
@@ -531,7 +555,56 @@ function StatCard({
   );
 }
 
-function NextClassCard({ onJoin }: { onJoin: () => void }) {
+type ScheduleStatus = "loading" | "error" | "ready";
+
+function NextClassCard({
+  status,
+  lessons,
+  now,
+  hasLink,
+  onJoin,
+}: {
+  status: ScheduleStatus;
+  lessons: Lesson[] | null;
+  now: WallClock;
+  hasLink: (lesson: Lesson) => boolean;
+  onJoin: (lesson: Lesson) => void;
+}) {
+  const next = lessons ? findNextLesson(lessons, now) : null;
+  const lesson = next?.lesson ?? null;
+
+  // Правий блок — пари того ж дня, що й найближча (або сьогоднішні, якщо пар більше немає)
+  const focusDate = lesson?.date ?? now.date;
+  const dayLessons = lessons ? lessonsOnDate(lessons, focusDate) : [];
+  let visible = dayLessons;
+  if (dayLessons.length > 4) {
+    const firstActive = dayLessons.findIndex((item) => lessonState(item, now) !== "done");
+    const from = Math.max(
+      0,
+      Math.min(firstActive < 0 ? dayLessons.length - 4 : firstActive - 1, dayLessons.length - 4),
+    );
+    visible = dayLessons.slice(from, from + 4);
+  }
+
+  let emptyTitle = "";
+  let emptyText = "";
+  if (status === "loading") {
+    emptyTitle = "Завантажуємо розклад…";
+  } else if (status === "error" && !lessons) {
+    emptyTitle = "Не вдалося завантажити розклад";
+    emptyText = "Перевірте з’єднання — спробуємо ще раз автоматично.";
+  } else if (!lessons) {
+    emptyTitle = "Розклад ще не завантажено";
+    emptyText = "Адміністратор додасть розклад вашої групи — і тут зʼявиться найближча пара.";
+  } else if (!lesson) {
+    emptyTitle = "Найближчих пар немає";
+    emptyText = "У завантаженому розкладі більше немає запланованих занять.";
+  }
+
+  const countdown = next ? countdownParts(next) : null;
+  const minutes = lesson ? lessonDuration(lesson) : 0;
+  const showJoin = lesson ? hasLink(lesson) || isRemote(lesson.room) : false;
+
   return (
     <section className="glass-panel next-class-card" aria-labelledby="next-class-heading">
       <div className="class-watermark" aria-hidden="true">
@@ -542,75 +615,98 @@ function NextClassCard({ onJoin }: { onJoin: () => void }) {
           <div>
             <span className="section-badge">
               <span className="section-badge-dot" />
-              Наступна пара
+              {next?.state === "current" ? "Зараз триває" : "Наступна пара"}
             </span>
             <h2 id="next-class-heading" className="section-title mt-4">
-              Кримінальне право
+              {lesson ? lesson.subject : emptyTitle}
             </h2>
+            {!lesson && emptyText && <p className="class-empty-text">{emptyText}</p>}
           </div>
-          <div className="class-countdown">
-            <Clock3 size={15} />
-            <span>
-              Через <strong>24 хв</strong>
-            </span>
-          </div>
+          {countdown && (
+            <div className="class-countdown">
+              <Clock3 size={15} />
+              <span>
+                {countdown.label} <strong>{countdown.value}</strong>
+              </span>
+            </div>
+          )}
         </div>
 
-        <div className="class-meta">
-          <div>
-            <Clock3 size={16} />
-            <span>
-              <strong>10:30–11:50</strong>
-              <small>80 хвилин</small>
-            </span>
-          </div>
-          <div>
-            <MapPin size={16} />
-            <span>
-              <strong>Аудиторія 304</strong>
-              <small>Корпус 2</small>
-            </span>
-          </div>
-          <div>
-            <GraduationCap size={16} />
-            <span>
-              <strong>Ірина Мельник</strong>
-              <small>Професор</small>
-            </span>
-          </div>
-        </div>
+        {lesson && (
+          <>
+            <div className="class-meta">
+              <div>
+                <Clock3 size={16} />
+                <span>
+                  <strong>
+                    {lesson.start}–{lesson.end}
+                  </strong>
+                  <small>
+                    {dayLabel(lesson.date, now.date)} · {minutes} {pluralUk(minutes, "хвилина", "хвилини", "хвилин")}
+                  </small>
+                </span>
+              </div>
+              <div>
+                <MapPin size={16} />
+                <span>
+                  <strong>
+                    {isRemote(lesson.room) ? "Дистанційно" : lesson.room ? `Аудиторія ${lesson.room}` : "Аудиторію не вказано"}
+                  </strong>
+                  <small>{lesson.pair} пара</small>
+                </span>
+              </div>
+              <div>
+                <GraduationCap size={16} />
+                <span>
+                  <strong title={lesson.teacher}>{lesson.teacher || "Викладача не вказано"}</strong>
+                  <small>
+                    {kindLabel(lesson.kind)}
+                    {lesson.detail ? ` · ${lesson.detail}` : ""}
+                  </small>
+                </span>
+              </div>
+            </div>
 
-        <button type="button" className="primary-button" onClick={onJoin}>
-          Перейти до заняття
-          <ChevronRight size={17} />
-        </button>
+            {showJoin && (
+              <button type="button" className="primary-button" onClick={() => onJoin(lesson)}>
+                Перейти до заняття
+                <ChevronRight size={17} />
+              </button>
+            )}
+          </>
+        )}
       </div>
 
-      <div className="day-timeline" aria-label="Фрагмент розкладу на сьогодні">
-        <div className="timeline-line" aria-hidden="true" />
-        <div className="timeline-event timeline-event-done">
-          <span className="timeline-dot">
-            <Check size={10} />
-          </span>
-          <div>
-            <time>08:45</time>
-            <p>Стройова підготовка</p>
+      <div className="day-timeline" aria-label="Розклад на день">
+        <p className="timeline-caption">{lessons ? dayLabel(focusDate, now.date) : "Розклад"}</p>
+        {visible.length > 0 ? (
+          <div className="timeline-list">
+            <div className="timeline-line" aria-hidden="true" />
+            {visible.map((item) => {
+              const state = lessonState(item, now);
+              return (
+                <div
+                  key={`${item.date}-${item.start}-${item.subjectKey}-${item.detail}`}
+                  className={`timeline-event ${
+                    state === "done"
+                      ? "timeline-event-done"
+                      : state === "current"
+                        ? "timeline-event-current"
+                        : ""
+                  }`}
+                >
+                  <span className="timeline-dot">{state === "done" && <Check size={10} />}</span>
+                  <div>
+                    <time>{item.start}</time>
+                    <p>{item.subject}</p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </div>
-        <div className="timeline-event timeline-event-current">
-          <span className="timeline-dot" />
-          <div>
-            <time>10:30</time>
-            <p>Кримінальне право</p>
-          </div>
-        </div>
-        <div className="timeline-event">
-          <span className="timeline-dot" />
-          <div>
-            <time>12:10</time>
-            <p>Криміналістика</p>
-          </div>
-        </div>
+        ) : (
+          <p className="timeline-empty">{lessons ? "На цей день пар немає" : "Поки порожньо"}</p>
+        )}
       </div>
     </section>
   );
@@ -827,6 +923,10 @@ export default function Dashboard({
   const [toast, setToast] = useState<string | null>(null);
   const [scores, setScores] = useState<Scores | null>(null);
   const [ratingRefresh, setRatingRefresh] = useState(0);
+  const [groupInfo, setGroupInfo] = useState<GroupInfo | null>(null);
+  const [groupInfoFailed, setGroupInfoFailed] = useState(false);
+  const [rank, setRank] = useState<ReturnType<typeof groupRank>>(null);
+  const [now, setNow] = useState<WallClock>(() => kyivNow());
 
   const notificationRef = useRef<HTMLDivElement | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
@@ -843,12 +943,46 @@ export default function Dashboard({
     if (result.ok) setScores(result.data.scores);
   }, []);
 
+  const loadGroup = useCallback(async () => {
+    const result = await fetchGroupInfo();
+    if (result.ok) {
+      setGroupInfo(result.data);
+      setGroupInfoFailed(false);
+    } else {
+      setGroupInfoFailed(true);
+    }
+  }, []);
+
+  const loadRank = useCallback(async () => {
+    const result = await fetchGroupRatings();
+    if (result.ok) setRank(groupRank(result.data.students, result.data.me));
+  }, []);
+
+  const refresh = useCallback(() => {
+    void loadScores();
+    void loadGroup();
+    void loadRank();
+  }, [loadScores, loadGroup, loadRank]);
+
   const saveScore = async (key: SubjectKey, value: number): Promise<string | null> => {
     const result = await saveMyScore(key, value);
     if (!result.ok) return result.error;
     setScores((current) => (current ? { ...current, [key]: result.data.value } : current));
     setRatingRefresh((n) => n + 1);
+    void loadRank();
     return null;
+  };
+
+  const lessonLink = (lesson: Lesson) =>
+    groupInfo?.subjectLinks.find((link) => link.key === lesson.subjectKey)?.url ?? "";
+
+  const joinLesson = (lesson: Lesson) => {
+    const url = lessonLink(lesson);
+    if (!url) {
+      showToast("Посилання на це заняття ще не додано. Зверніться до адміністратора.");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
   const navigate = (id: string) => {
@@ -909,11 +1043,13 @@ export default function Dashboard({
     };
   }, [isMobileNavOpen, isNotificationsOpen, isProfileOpen]);
 
-  // Оцінки беруться з бази: оновлюємо при вході, поверненні на вкладку, зміні розділу і раз на 30 с.
+  // Оцінки, рейтинг і дані групи (розклад, дата сесії, посилання) беруться з бази:
+  // оновлюємо при вході, поверненні на вкладку, зміні розділу і раз на 30 с.
   useEffect(() => {
-    void loadScores();
+    refresh();
     const onVisible = () => {
-      if (document.visibilityState === "visible") void loadScores();
+      setNow(kyivNow());
+      if (document.visibilityState === "visible") refresh();
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
@@ -923,11 +1059,11 @@ export default function Dashboard({
       window.removeEventListener("focus", onVisible);
       window.clearInterval(timer);
     };
-  }, [loadScores]);
+  }, [refresh]);
 
   useEffect(() => {
-    void loadScores();
-  }, [activeNavId, loadScores]);
+    refresh();
+  }, [activeNavId, refresh]);
 
   useEffect(() => {
     document.body.style.overflow = isMobileNavOpen ? "hidden" : "";
@@ -945,6 +1081,9 @@ export default function Dashboard({
     },
     [],
   );
+
+  const sessionStart = groupInfo?.sessionStart ?? null;
+  const daysToSession = sessionStart ? daysBetween(now.date, sessionStart) : null;
 
   const currentSectionLabel =
     activeNavId === "profile" ? "Мій профіль" : (sectionLabels[activeNavId] ?? "Розділ");
@@ -1044,30 +1183,45 @@ export default function Dashboard({
                     </div>
                   </StatCard>
                   <StatCard
-                    label="Завдання"
-                    value={`${completedHomeworkIds.size} / ${homeworkItems.length}`}
-                    note="виконано цього тижня"
-                    icon={ClipboardCheck}
+                    label="Рейтинг у групі"
+                    value={rank?.hasScores ? `${rank.rank} місце` : "—"}
+                    note={
+                      !rank
+                        ? "дані недоступні"
+                        : rank.hasScores
+                          ? `із ${rank.total} ${pluralUk(rank.total, "студента", "студентів", "студентів")} у групі`
+                          : "зʼявиться, коли будуть оцінки"
+                    }
+                    icon={Trophy}
                     tone="violet"
                   >
-                    <div className="task-dots" aria-hidden="true">
-                      {homeworkItems.map((item) => (
-                        <i
-                          key={item.id}
-                          className={completedHomeworkIds.has(item.id) ? "task-dot-done" : ""}
-                        />
-                      ))}
-                    </div>
+                    <span className="rank-mark" aria-hidden="true">
+                      {rank?.hasScores ? `#${rank.rank}` : "—"}
+                    </span>
                   </StatCard>
                   <StatCard
                     label="До сесії"
-                    value="42 дні"
-                    note="початок 25 квітня"
+                    value={
+                      sessionStart === null
+                        ? "—"
+                        : daysToSession! > 0
+                          ? `${daysToSession} ${pluralUk(daysToSession!, "день", "дні", "днів")}`
+                          : daysToSession === 0
+                            ? "Сьогодні"
+                            : "Триває"
+                    }
+                    note={
+                      sessionStart === null
+                        ? "дату ще не вказано"
+                        : daysToSession! >= 0
+                          ? `початок ${longDate(sessionStart)}`
+                          : `розпочалась ${longDate(sessionStart)}`
+                    }
                     icon={CalendarDays}
                     tone="cyan"
                   >
                     <span className="calendar-mark" aria-hidden="true">
-                      25
+                      {sessionStart ? Number(sessionStart.slice(8, 10)) : "—"}
                     </span>
                   </StatCard>
                 </section>
@@ -1075,9 +1229,11 @@ export default function Dashboard({
                 <div className="dashboard-grid">
                   <div className="dashboard-primary">
                     <NextClassCard
-                      onJoin={() =>
-                        showToast("Посилання буде доступне за 10 хвилин до початку заняття.")
-                      }
+                      status={groupInfo ? "ready" : groupInfoFailed ? "error" : "loading"}
+                      lessons={groupInfo?.schedule?.lessons ?? null}
+                      now={now}
+                      hasLink={(lesson) => lessonLink(lesson) !== ""}
+                      onJoin={joinLesson}
                     />
                     <SubjectsCard
                       items={filteredSubjects}

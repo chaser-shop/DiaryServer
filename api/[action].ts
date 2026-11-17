@@ -190,6 +190,113 @@ async function logActivity(
   await db.collection("activity").insertOne({ ...entry, administrator: admin, createdAt: new Date() });
 }
 
+// ---------------------------------------------------------------------------
+// Розклад, дата сесії, посилання на пари (зберігаються в документі групи)
+// ---------------------------------------------------------------------------
+type LessonDoc = {
+  date: string;
+  pair: number;
+  start: string;
+  end: string;
+  subject: string;
+  subjectKey: string;
+  kind: string;
+  detail: string;
+  room: string;
+  teacher: string;
+};
+
+const MAX_LESSONS = 3000;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const KEY_RE = /^[\p{L}\p{N}_-]{1,60}$/u;
+
+function isIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split("-").map(Number);
+  const probe = new Date(Date.UTC(y, m - 1, d));
+  return (
+    probe.getUTCFullYear() === y && probe.getUTCMonth() === m - 1 && probe.getUTCDate() === d && y >= 2000 && y <= 2100
+  );
+}
+
+function cleanLesson(raw: any): LessonDoc {
+  const lesson: LessonDoc = {
+    date: typeof raw?.date === "string" ? raw.date : "",
+    pair: Number(raw?.pair),
+    start: typeof raw?.start === "string" ? raw.start : "",
+    end: typeof raw?.end === "string" ? raw.end : "",
+    subject: str(raw?.subject, 80),
+    subjectKey: str(raw?.subjectKey, 60),
+    kind: str(raw?.kind, 30),
+    detail: str(raw?.detail, 40),
+    room: str(raw?.room, 120),
+    teacher: str(raw?.teacher, 160),
+  };
+  if (
+    !isIsoDate(lesson.date) ||
+    !Number.isInteger(lesson.pair) ||
+    lesson.pair < 1 ||
+    lesson.pair > 12 ||
+    !TIME_RE.test(lesson.start) ||
+    !TIME_RE.test(lesson.end) ||
+    !lesson.subject ||
+    !KEY_RE.test(lesson.subjectKey)
+  ) {
+    throw new HttpError(400, "Розклад містить некоректний запис. Перевірте файл і завантажте його ще раз.");
+  }
+  return lesson;
+}
+
+/** Порожній рядок — «без посилання»; інакше лише http(s). */
+function cleanUrl(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  if (!text) return "";
+  if (text.length > 500) throw new HttpError(400, "Посилання задовге (до 500 символів).");
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    throw new HttpError(400, `Некоректне посилання: ${text.slice(0, 60)}`);
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new HttpError(400, "Посилання має починатися з http:// або https://");
+  }
+  return url.toString();
+}
+
+function cleanSubjectLinks(value: unknown): { key: string; url: string }[] {
+  if (!Array.isArray(value)) throw new HttpError(400, "Некоректний список посилань.");
+  if (value.length > 100) throw new HttpError(400, "Забагато предметів.");
+  const seen = new Set<string>();
+  const result: { key: string; url: string }[] = [];
+  for (const item of value) {
+    const key = str((item as any)?.key, 60);
+    if (!KEY_RE.test(key) || seen.has(key)) continue;
+    const url = cleanUrl((item as any)?.url);
+    if (!url) continue;
+    seen.add(key);
+    result.push({ key, url });
+  }
+  return result;
+}
+
+const subjectLinksOf = (g: any): { key: string; url: string }[] =>
+  Array.isArray(g?.subjectLinks)
+    ? g.subjectLinks.map((l: any) => ({ key: String(l.key), url: String(l.url) }))
+    : [];
+
+const scheduleOf = (g: any) =>
+  g?.schedule && Array.isArray(g.schedule.lessons)
+    ? {
+        fileName: String(g.schedule.fileName ?? ""),
+        uploadedAt: new Date(g.schedule.uploadedAt ?? Date.now()).toISOString(),
+        groupLabel: g.schedule.groupLabel ? String(g.schedule.groupLabel) : undefined,
+        period: g.schedule.period ? String(g.schedule.period) : undefined,
+        lessons: g.schedule.lessons as LessonDoc[],
+      }
+    : null;
+
 const groupDto = (g: any) => ({
   id: String(g._id),
   name: g.name,
@@ -198,6 +305,9 @@ const groupDto = (g: any) => ({
   academicYear: g.academicYear,
   curator: g.curator,
   status: g.status,
+  sessionStart: typeof g.sessionStart === "string" ? g.sessionStart : null,
+  subjectLinks: subjectLinksOf(g),
+  schedule: scheduleOf(g),
 });
 
 const emptyScores = () => Object.fromEntries(SUBJECTS.map((k) => [k, 0])) as Record<SubjectKey, number>;
@@ -282,6 +392,76 @@ async function adminAction(action: string, req: VercelRequest, res: VercelRespon
       if (e?.code === 11000) throw new HttpError(409, "Група з такою назвою вже існує.");
       throw e;
     }
+  }
+
+  if (action === "admin-group-update") {
+    post();
+    const id = toObjectId(body.groupId);
+    const set: Record<string, unknown> = {};
+    const unset: Record<string, ""> = {};
+    const changes: string[] = [];
+
+    if ("sessionStart" in body) {
+      const value = typeof body.sessionStart === "string" ? body.sessionStart.trim() : "";
+      if (!value) unset.sessionStart = "";
+      else if (isIsoDate(value)) set.sessionStart = value;
+      else throw new HttpError(400, "Некоректна дата початку сесії.");
+      changes.push(value ? `дату сесії ${value}` : "очищено дату сесії");
+    }
+    if ("subjectLinks" in body) {
+      set.subjectLinks = cleanSubjectLinks(body.subjectLinks);
+      changes.push("посилання на пари");
+    }
+    if (!changes.length) throw new HttpError(400, "Немає що зберігати.");
+
+    const update: Record<string, unknown> = {};
+    if (Object.keys(set).length) update.$set = set;
+    if (Object.keys(unset).length) update.$unset = unset;
+    const group: any = await db
+      .collection("groups")
+      .findOneAndUpdate({ _id: id }, update, { returnDocument: "after" });
+    if (!group) throw new HttpError(404, "Групу не знайдено.");
+    await logActivity(db, session.name, {
+      summary: `Група ${group.name}: оновлено ${changes.join(", ")}`,
+      entityType: "group",
+    });
+    return res.status(200).json({ group: groupDto(group) });
+  }
+
+  if (action === "admin-group-schedule") {
+    post();
+    const id = toObjectId(body.groupId);
+    const rawLessons = Array.isArray(body.lessons) ? body.lessons : null;
+    if (!rawLessons) throw new HttpError(400, "Некоректний розклад.");
+    if (rawLessons.length > MAX_LESSONS) throw new HttpError(400, "Розклад завеликий.");
+
+    let update: Record<string, unknown>;
+    let summary: string;
+    if (rawLessons.length === 0) {
+      update = { $unset: { schedule: "" } };
+      summary = "видалено розклад";
+    } else {
+      const lessons = rawLessons.map(cleanLesson);
+      const fileName = str(body.fileName, 200) || "schedule.xls";
+      update = {
+        $set: {
+          schedule: {
+            fileName,
+            groupLabel: str(body.groupLabel, 120),
+            period: str(body.period, 60),
+            uploadedAt: new Date(),
+            lessons,
+          },
+        },
+      };
+      summary = `завантажено розклад (${lessons.length} пар, ${fileName})`;
+    }
+    const group: any = await db
+      .collection("groups")
+      .findOneAndUpdate({ _id: id }, update, { returnDocument: "after" });
+    if (!group) throw new HttpError(404, "Групу не знайдено.");
+    await logActivity(db, session.name, { summary: `Група ${group.name}: ${summary}`, entityType: "schedule" });
+    return res.status(200).json({ group: groupDto(group) });
   }
 
   if (action === "admin-student-create") {
@@ -424,6 +604,17 @@ async function studentAction(action: string, req: VercelRequest, res: VercelResp
     return res.status(200).json({ ok: true, value });
   }
 
+  if (action === "my-group-info") {
+    const group: any = await db.collection("groups").findOne({ _id: student.groupId });
+    const schedule = scheduleOf(group);
+    return res.status(200).json({
+      groupName: group?.name ?? "",
+      sessionStart: typeof group?.sessionStart === "string" ? group.sessionStart : null,
+      schedule: schedule ? { uploadedAt: schedule.uploadedAt, lessons: schedule.lessons } : null,
+      subjectLinks: subjectLinksOf(group),
+    });
+  }
+
   if (action === "group-ratings") {
     const rows = await db.collection("grades").find({ groupId: student.groupId }).toArray();
     return res.status(200).json({
@@ -497,11 +688,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ok: true });
     }
 
-    if (action === "my-grades" || action === "my-grade-update" || action === "group-ratings") {
+    if (
+      action === "my-grades" ||
+      action === "my-grade-update" ||
+      action === "group-ratings" ||
+      action === "my-group-info"
+    ) {
       const session = await readSession(req);
       if (!session) return res.status(401).json({ error: "Потрібен вхід" });
       if (session.role !== "student") {
         // Адміністратор не має власних оцінок
+        if (action === "my-group-info") {
+          return res.status(200).json({ groupName: "", sessionStart: null, schedule: null, subjectLinks: [] });
+        }
         if (action === "group-ratings") return res.status(200).json({ me: "", students: [] });
         if (action === "my-grades") return res.status(200).json({ scores: null });
         return res.status(403).json({ error: "Лише для студентів" });

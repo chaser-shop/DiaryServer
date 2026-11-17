@@ -5,6 +5,7 @@ import type {
   LessonRow,
   StudentRow,
 } from "./AcademyDashboard";
+import type { Lesson, SubjectLink } from "../schedule";
 
 export type CreatedStudent = {
   id: string;
@@ -55,3 +56,16 @@ export const resetStudentPassword = (studentId: string) =>
 
 export const updateGrade = (gradeId: string, key: string, value: number) =>
   call<{ value: number }>("admin-grade-update", { gradeId, key, value });
+
+export const updateGroup = (
+  groupId: string,
+  patch: { sessionStart?: string | null; subjectLinks?: SubjectLink[] },
+) => call<{ group: AcademyGroup }>("admin-group-update", { groupId, ...patch });
+
+export const saveGroupSchedule = (input: {
+  groupId: string;
+  fileName: string;
+  groupLabel: string;
+  period: string;
+  lessons: Lesson[];
+}) => call<{ group: AcademyGroup }>("admin-group-schedule", input);

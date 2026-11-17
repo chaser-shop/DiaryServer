@@ -1,3 +1,4 @@
+import type { GroupInfo } from "./schedule";
 import type { Scores } from "./subjects";
 
 export type GroupStudent = { id: string; name: string; scores: Scores };
@@ -26,3 +27,5 @@ export const saveMyScore = (key: string, value: number) =>
 
 export const fetchGroupRatings = () =>
   request<{ me: string; students: GroupStudent[] }>("group-ratings");
+
+export const fetchGroupInfo = () => request<GroupInfo>("my-group-info");

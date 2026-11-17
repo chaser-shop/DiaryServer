@@ -18,3 +18,19 @@ export const averageScore = (scores: Scores) =>
   SUBJECTS.reduce((sum, s) => sum + (Number(scores[s.key]) || 0), 0) / SUBJECTS.length;
 
 export const formatAverage = (value: number) => value.toFixed(1);
+
+/**
+ * Місце студента в групі за середнім балом. Однакові бали ділять одне місце (1, 1, 3…),
+ * так само, як у вкладці «Рейтинг групи». Повертає null, якщо студента немає в списку.
+ */
+export function groupRank(
+  students: { id: string; scores: Scores }[],
+  meId: string,
+): { rank: number; total: number; hasScores: boolean } | null {
+  const me = students.find((student) => student.id === meId);
+  if (!me) return null;
+  const sum = (scores: Scores) => SUBJECTS.reduce((acc, s) => acc + (Number(scores[s.key]) || 0), 0);
+  const mine = sum(me.scores);
+  const better = students.filter((student) => sum(student.scores) > mine).length;
+  return { rank: better + 1, total: students.length, hasScores: mine > 0 };
+}
