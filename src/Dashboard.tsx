@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 
-export type SessionUser = { login: string; name: string };
+export type SessionUser = { login: string; name: string; role?: string; group?: string };
 
 const UserContext = createContext<SessionUser>({ login: "", name: "" });
 
@@ -314,7 +314,9 @@ function Sidebar({
         <div className="profile-avatar">{userInitials(user.name)}</div>
         <div className="sidebar-copy min-w-0 flex-1">
           <p className="truncate text-[13px] font-semibold text-white">{user.name}</p>
-          <p className="mt-0.5 truncate text-[11px] text-slate-400">Курсант • 3 курс</p>
+          <p className="mt-0.5 truncate text-[11px] text-slate-400">
+            {user.group ? `Група ${user.group}` : "Курсант"}
+          </p>
         </div>
         <IconButton label="Вийти" onClick={onLogout} className="sidebar-logout">
           <LogOut size={17} />
@@ -465,7 +467,7 @@ function TopBar({
                 <span className="topbar-avatar">{userInitials(user.name)}</span>
                 <span>
                   <strong>{user.name}</strong>
-                  <small>{user.login}</small>
+                  <small>{user.group ? `${user.group} · ${user.login}` : user.login}</small>
                 </span>
               </div>
               <div className="profile-menu">
@@ -475,6 +477,11 @@ function TopBar({
                 <button type="button" onClick={() => onNavigate("settings")}>
                   <Settings size={16} /> Налаштування
                 </button>
+                {user.role === "admin" && (
+                  <button type="button" onClick={() => window.location.assign("/admin")}>
+                    <ShieldCheck size={16} /> Адмін-панель
+                  </button>
+                )}
                 <button type="button" className="profile-menu-logout" onClick={onLogout}>
                   <LogOut size={16} /> Вийти
                 </button>

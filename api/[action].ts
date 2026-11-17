@@ -1,39 +1,41 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { MongoClient, type Collection } from "mongodb";
+import { MongoClient, ObjectId, type Db } from "mongodb";
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
-
-type UserDoc = {
-  login: string;
-  passwordHash: string;
-  name: string;
-  role: string;
-  createdAt: Date;
-};
+import { randomInt } from "node:crypto";
 
 const COOKIE = "navs_session";
 const MAX_AGE = 60 * 60 * 24 * 7; // 7 днів
 
-// --- MongoDB (кешується між викликами serverless-функції) ---
-const globalForMongo = globalThis as unknown as {
-  __navsMongo?: Promise<Collection<UserDoc>>;
-};
+const SUBJECTS = ["kpu", "spou", "it", "english", "vds", "umsp", "sfp", "tidtp"] as const;
+type SubjectKey = (typeof SUBJECTS)[number];
 
-function getUsers(): Promise<Collection<UserDoc>> {
-  if (!globalForMongo.__navsMongo) {
+// ---------------------------------------------------------------------------
+// MongoDB (кешується між викликами serverless-функції)
+// Колекції: users (службові), groups, students, grades, lessons, activity
+// ---------------------------------------------------------------------------
+const globalForMongo = globalThis as unknown as { __navsDb?: Promise<Db> };
+
+function getDb(): Promise<Db> {
+  if (!globalForMongo.__navsDb) {
     const uri = process.env.MONGODB_URI;
     if (!uri) throw new Error("MONGODB_URI is not set");
-    globalForMongo.__navsMongo = (async () => {
+    globalForMongo.__navsDb = (async () => {
       const client = await new MongoClient(uri).connect();
-      const users = client.db(process.env.MONGODB_DB || "navs-era").collection<UserDoc>("users");
-      // Унікальний індекс лише для документів, де login — рядок (старі записи без login ігноруються).
+      const db = client.db(process.env.MONGODB_DB || "navs-era");
+      const users = db.collection("users");
       // Помилка індексу не повинна блокувати вхід.
-      await users
-        .createIndex(
+      const safe = (p: Promise<unknown>) =>
+        p.catch((e) => console.warn("createIndex skipped:", e instanceof Error ? e.message : e));
+      await safe(
+        users.createIndex(
           { login: 1 },
           { unique: true, partialFilterExpression: { login: { $type: "string" } } },
-        )
-        .catch((e) => console.warn("createIndex skipped:", e instanceof Error ? e.message : e));
+        ),
+      );
+      await safe(db.collection("students").createIndex({ login: 1 }, { unique: true }));
+      await safe(db.collection("groups").createIndex({ name: 1 }, { unique: true }));
+      await safe(db.collection("grades").createIndex({ studentId: 1 }, { unique: true }));
       // Початковий користувач: admin / admin123 (створюється один раз)
       await users.updateOne(
         { login: "admin" },
@@ -48,16 +50,20 @@ function getUsers(): Promise<Collection<UserDoc>> {
         },
         { upsert: true },
       );
-      return users;
+      return db;
     })().catch((err) => {
-      globalForMongo.__navsMongo = undefined;
+      globalForMongo.__navsDb = undefined;
       throw err;
     });
   }
-  return globalForMongo.__navsMongo;
+  return globalForMongo.__navsDb;
 }
 
-// --- Сесія (JWT у httpOnly cookie) ---
+// ---------------------------------------------------------------------------
+// Сесія (JWT у httpOnly cookie)
+// ---------------------------------------------------------------------------
+type Session = { login: string; name: string; role: string; group?: string };
+
 function secret() {
   const s = process.env.JWT_SECRET;
   if (!s) throw new Error("JWT_SECRET is not set");
@@ -69,7 +75,7 @@ function cookie(value: string, maxAge: number) {
   return `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
 }
 
-async function readSession(req: VercelRequest) {
+async function readSession(req: VercelRequest): Promise<Session | null> {
   const raw = req.headers.cookie
     ?.split(";")
     .map((c) => c.trim())
@@ -78,15 +84,295 @@ async function readSession(req: VercelRequest) {
   if (!raw) return null;
   try {
     const { payload } = await jwtVerify(raw, secret());
-    return { login: String(payload.sub), name: String(payload.name ?? "") };
+    return {
+      login: String(payload.sub),
+      name: String(payload.name ?? ""),
+      role: typeof payload.role === "string" ? payload.role : "student",
+      group: typeof payload.group === "string" ? payload.group : undefined,
+    };
   } catch {
     return null;
   }
 }
 
+async function startSession(res: VercelResponse, s: Session) {
+  const token = await new SignJWT({ name: s.name, role: s.role, group: s.group })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(s.login)
+    .setIssuedAt()
+    .setExpirationTime(`${MAX_AGE}s`)
+    .sign(secret());
+  res.setHeader("Set-Cookie", cookie(token, MAX_AGE));
+  return res.status(200).json({ user: s });
+}
+
 // Фіктивний хеш, щоб час відповіді не видавав, чи існує логін
 const DUMMY_HASH = bcrypt.hashSync("dummy-password", 10);
 
+// ---------------------------------------------------------------------------
+// Генерація логіну та тимчасового пароля студента
+// ---------------------------------------------------------------------------
+const UA_TO_LATIN: Record<string, string> = {
+  а: "a", б: "b", в: "v", г: "h", ґ: "g", д: "d", е: "e", є: "ye", ж: "zh", з: "z",
+  и: "y", і: "i", ї: "yi", й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p",
+  р: "r", с: "s", т: "t", у: "u", ф: "f", х: "kh", ц: "ts", ч: "ch", ш: "sh",
+  щ: "shch", ь: "", ю: "yu", я: "ya", ы: "y", э: "e", ё: "yo", ъ: "",
+};
+
+function transliterate(input: string): string {
+  return Array.from(input.toLowerCase())
+    .map((char) => UA_TO_LATIN[char] ?? char)
+    .join("")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+const SUFFIX_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+const UPPER = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+const LOWER = "abcdefghijkmnpqrstuvwxyz";
+const DIGITS = "23456789";
+const pick = (alphabet: string) => alphabet[randomInt(alphabet.length)];
+
+const normalizeName = (value: string) => value.replace(/\s+/g, " ").trim();
+
+/** «Коваленко Олена Петрівна» + «КН-21» → kovalenko.op.kn21.x7k */
+function generateLogin(fullName: string, groupName: string): string {
+  const [surname = "", ...rest] = normalizeName(fullName).split(" ");
+  const initials = rest.map((part) => transliterate(part).charAt(0)).join("");
+  const suffix = Array.from({ length: 3 }, () => pick(SUFFIX_ALPHABET)).join("");
+  return [transliterate(surname).slice(0, 24), initials, transliterate(groupName).slice(0, 12), suffix]
+    .filter(Boolean)
+    .join(".");
+}
+
+function generatePassword(length = 12): string {
+  const all = UPPER + LOWER + DIGITS;
+  const chars = [pick(UPPER), pick(LOWER), pick(DIGITS)];
+  while (chars.length < length) chars.push(pick(all));
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
+}
+
+// ---------------------------------------------------------------------------
+// Допоміжне для адмін-дій
+// ---------------------------------------------------------------------------
+class HttpError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+function toObjectId(value: unknown): ObjectId {
+  if (typeof value === "string" && ObjectId.isValid(value) && value.length === 24) {
+    return new ObjectId(value);
+  }
+  throw new HttpError(400, "Некоректний ідентифікатор");
+}
+
+const str = (value: unknown, max: number) =>
+  typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "";
+
+async function logActivity(
+  db: Db,
+  admin: string,
+  entry: {
+    summary: string;
+    entityType: "grade" | "student" | "group" | "schedule";
+    previousValue?: string;
+    newValue?: string;
+  },
+) {
+  await db.collection("activity").insertOne({ ...entry, administrator: admin, createdAt: new Date() });
+}
+
+const groupDto = (g: any) => ({
+  id: String(g._id),
+  name: g.name,
+  faculty: g.faculty,
+  course: g.course,
+  academicYear: g.academicYear,
+  curator: g.curator,
+  status: g.status,
+});
+
+const emptyScores = () => Object.fromEntries(SUBJECTS.map((k) => [k, 0])) as Record<SubjectKey, number>;
+
+async function adminAction(action: string, req: VercelRequest, res: VercelResponse, session: Session) {
+  const db = await getDb();
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const post = () => {
+    if (req.method !== "POST") throw new HttpError(405, "Method not allowed");
+  };
+
+  if (action === "admin-bootstrap") {
+    const [groups, students, grades, lessons, activity] = await Promise.all([
+      db.collection("groups").find().sort({ name: 1 }).toArray(),
+      db.collection("students").find().sort({ fullName: 1 }).toArray(),
+      db.collection("grades").find().sort({ studentName: 1 }).toArray(),
+      db.collection("lessons").find().limit(1000).toArray(),
+      db.collection("activity").find().sort({ createdAt: -1 }).limit(100).toArray(),
+    ]);
+    return res.status(200).json({
+      groups: groups.map(groupDto),
+      students: students.map((s: any) => ({
+        id: String(s._id),
+        fullName: s.fullName,
+        login: s.login,
+        password: s.tempPassword ?? undefined,
+        groupId: String(s.groupId),
+        status: s.status,
+        role: "student",
+      })),
+      grades: grades.map((g: any) => ({
+        id: String(g._id),
+        studentName: g.studentName,
+        groupId: String(g.groupId),
+        studentId: String(g.studentId),
+        scores: Object.fromEntries(SUBJECTS.map((k) => [k, Number(g[k] ?? 0)])),
+      })),
+      lessons: lessons.map((l: any) => ({
+        id: String(l._id),
+        groupId: String(l.groupId),
+        day: l.day,
+        time: l.time,
+        subject: l.subject,
+        teacher: l.teacher,
+        lessonType: l.lessonType,
+        location: l.location,
+      })),
+      activity: activity.map((a: any) => ({
+        id: String(a._id),
+        summary: a.summary,
+        entityType: a.entityType,
+        administrator: a.administrator,
+        createdAt: new Date(a.createdAt).toISOString(),
+        previousValue: a.previousValue,
+        newValue: a.newValue,
+      })),
+    });
+  }
+
+  if (action === "admin-group-create") {
+    post();
+    const name = str(body.name, 40);
+    const faculty = str(body.faculty, 120);
+    const curator = str(body.curator, 120);
+    const academicYear = str(body.academicYear, 20);
+    const course = Number(body.course);
+    const status = ["active", "archived", "enrollment"].includes(String(body.status))
+      ? String(body.status)
+      : "active";
+    if (!name || !faculty || !curator || !academicYear) {
+      throw new HttpError(400, "Заповніть усі поля групи.");
+    }
+    if (!Number.isInteger(course) || course < 1 || course > 6) {
+      throw new HttpError(400, "Курс має бути від 1 до 6.");
+    }
+    try {
+      const doc = { name, faculty, course, academicYear, curator, status, createdAt: new Date() };
+      const { insertedId } = await db.collection("groups").insertOne(doc);
+      await logActivity(db, session.name, { summary: `Створено групу ${name}`, entityType: "group" });
+      return res.status(200).json({ group: groupDto({ _id: insertedId, ...doc }) });
+    } catch (e: any) {
+      if (e?.code === 11000) throw new HttpError(409, "Група з такою назвою вже існує.");
+      throw e;
+    }
+  }
+
+  if (action === "admin-student-create") {
+    post();
+    const fullName = normalizeName(typeof body.fullName === "string" ? body.fullName : "");
+    if (fullName.length < 3 || fullName.length > 120) {
+      throw new HttpError(400, "Вкажіть ПІБ студента (від 3 до 120 символів).");
+    }
+    const group: any = await db.collection("groups").findOne({ _id: toObjectId(body.groupId) });
+    if (!group) throw new HttpError(400, "Обрана група не існує.");
+    if (group.status === "archived") throw new HttpError(400, "Не можна додавати студентів в архівну групу.");
+
+    const password = generatePassword();
+    const passwordHash = await bcrypt.hash(password, 10);
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const login = generateLogin(fullName, group.name);
+      try {
+        const { insertedId } = await db.collection("students").insertOne({
+          login,
+          passwordHash,
+          tempPassword: password,
+          fullName,
+          groupId: group._id,
+          status: "active",
+          createdAt: new Date(),
+        });
+        const { insertedId: gradeId } = await db.collection("grades").insertOne({
+          studentId: insertedId,
+          studentName: fullName,
+          groupId: group._id,
+          ...emptyScores(),
+          updatedAt: new Date(),
+        });
+        await logActivity(db, session.name, {
+          summary: `Додано студента ${fullName} (${group.name})`,
+          entityType: "student",
+        });
+        return res.status(200).json({
+          student: {
+            id: String(insertedId),
+            gradeId: String(gradeId),
+            fullName,
+            login,
+            password,
+            groupId: String(group._id),
+            groupName: group.name,
+          },
+        });
+      } catch (e: any) {
+        if (e?.code === 11000) continue; // логін зайнятий — інший суфікс
+        throw e;
+      }
+    }
+    throw new HttpError(500, "Не вдалося згенерувати унікальний логін. Спробуйте ще раз.");
+  }
+
+  if (action === "admin-student-reset") {
+    post();
+    const id = toObjectId(body.studentId);
+    const password = generatePassword();
+    const result = await db
+      .collection("students")
+      .updateOne({ _id: id }, { $set: { passwordHash: await bcrypt.hash(password, 10), tempPassword: password } });
+    if (!result.matchedCount) throw new HttpError(404, "Студента не знайдено.");
+    return res.status(200).json({ password });
+  }
+
+  if (action === "admin-grade-update") {
+    post();
+    const key = String(body.key) as SubjectKey;
+    if (!SUBJECTS.includes(key)) throw new HttpError(400, "Невідома дисципліна.");
+    const raw = Number(body.value);
+    const value = Math.max(0, Math.min(100, Number.isFinite(raw) ? Math.round(raw) : 0));
+    const id = toObjectId(body.gradeId);
+    const before: any = await db
+      .collection("grades")
+      .findOneAndUpdate({ _id: id }, { $set: { [key]: value, updatedAt: new Date() } }, { returnDocument: "before" });
+    if (!before) throw new HttpError(404, "Запис оцінок не знайдено.");
+    await logActivity(db, session.name, {
+      summary: `Змінено оцінку для ${before.studentName} (${key})`,
+      entityType: "grade",
+      previousValue: String(before[key] ?? 0),
+      newValue: String(value),
+    });
+    return res.status(200).json({ ok: true, value });
+  }
+
+  throw new HttpError(404, "Not found");
+}
+
+// ---------------------------------------------------------------------------
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("Cache-Control", "no-store");
   const action = String(req.query.action);
@@ -98,7 +384,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         JWT_SECRET: !!process.env.JWT_SECRET,
       };
       if (!env.MONGODB_URI || !env.JWT_SECRET) return res.status(500).json({ ok: false, env });
-      await getUsers();
+      await getDb();
       return res.status(200).json({ ok: true, env, mongo: "connected" });
     }
 
@@ -108,19 +394,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (typeof login !== "string" || typeof password !== "string" || !login || !password) {
         return res.status(400).json({ error: "Введіть логін і пароль" });
       }
-      const users = await getUsers();
-      const user = await users.findOne({ login: login.trim().toLowerCase() });
-      const ok = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
-      if (!user || !ok) return res.status(401).json({ error: "Невірний логін або пароль" });
+      const normalized = login.trim().toLowerCase();
+      const db = await getDb();
 
-      const token = await new SignJWT({ name: user.name })
-        .setProtectedHeader({ alg: "HS256" })
-        .setSubject(user.login)
-        .setIssuedAt()
-        .setExpirationTime(`${MAX_AGE}s`)
-        .sign(secret());
-      res.setHeader("Set-Cookie", cookie(token, MAX_AGE));
-      return res.status(200).json({ user: { login: user.login, name: user.name } });
+      // 1) Службовий користувач (admin)
+      const user: any = await db.collection("users").findOne({ login: normalized });
+      if (user) {
+        const ok = await bcrypt.compare(password, user.passwordHash ?? DUMMY_HASH);
+        if (!ok) return res.status(401).json({ error: "Невірний логін або пароль" });
+        return startSession(res, { login: user.login, name: user.name, role: user.role ?? "admin" });
+      }
+
+      // 2) Студент, створений адміністратором
+      const student: any = await db.collection("students").findOne({ login: normalized });
+      const ok = await bcrypt.compare(password, student?.passwordHash ?? DUMMY_HASH);
+      if (!student || !ok) return res.status(401).json({ error: "Невірний логін або пароль" });
+      if (student.status === "expelled") return res.status(403).json({ error: "Доступ закрито" });
+      const group: any = await db.collection("groups").findOne({ _id: student.groupId });
+      return startSession(res, {
+        login: student.login,
+        name: student.fullName,
+        role: "student",
+        group: group?.name,
+      });
     }
 
     if (action === "me") {
@@ -134,15 +430,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ok: true });
     }
 
+    if (action.startsWith("admin-")) {
+      const session = await readSession(req);
+      if (!session) return res.status(401).json({ error: "Потрібен вхід" });
+      if (session.role !== "admin") return res.status(403).json({ error: "Лише для адміністратора" });
+      return await adminAction(action, req, res, session);
+    }
+
     return res.status(404).json({ error: "Not found" });
   } catch (err) {
+    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
     console.error(err);
     const msg = err instanceof Error ? err.message : String(err);
     let error = "Помилка сервера";
     if (/MONGODB_URI is not set/.test(msg)) error = "На сервері не задано MONGODB_URI";
     else if (/JWT_SECRET is not set/.test(msg)) error = "На сервері не задано JWT_SECRET";
     else if (/ssl|tls|ECONNREFUSED|ENOTFOUND|timed out|Server selection|whitelist|IP/i.test(msg))
-      error = "Немає підключення до MongoDB (перевірте Network Access в Atlas і MONGODB_URI)";
+      error = "Немає підключення до MongoDB (перевірте Network Access в Атласі і MONGODB_URI)";
     else if (/auth|Authentication/i.test(msg))
       error = "MongoDB: невірний користувач/пароль у MONGODB_URI";
     return res.status(500).json({ error, detail: msg.slice(0, 200) });

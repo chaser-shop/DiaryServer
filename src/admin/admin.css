@@ -1,0 +1,25 @@
+/* Палітра панелі адміна — та сама, що на сайті main.
+   Tailwind v4 бере кольори з CSS-змінних, тому перевизначення діє лише всередині .admin-theme
+   і не змінює решту сайту. */
+.admin-theme {
+  --color-blue-300: #9cc4f7;
+  --color-blue-400: #67a6f4;
+  --color-blue-500: #3478d4;
+  --color-blue-600: #2457a6;
+  --color-blue-700: #1c4585;
+  --color-blue-800: #153461;
+
+  --color-slate-100: #f3f6fa;
+  --color-slate-200: #dbe4ee;
+  --color-slate-300: #b8c5d6;
+  --color-slate-400: #93a5bb;
+  --color-slate-500: #6f839c;
+  --color-slate-600: #546a85;
+  --color-slate-700: #3d5470;
+  --color-slate-800: #243a56;
+  --color-slate-900: #142b45;
+  --color-slate-950: #0b1d35;
+
+  color-scheme: dark;
+  font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
+}

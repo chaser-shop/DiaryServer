@@ -1,25 +1,5 @@
-import { FormEvent, type ReactNode, useState } from "react";
-
-type SelectFieldProps = {
-  id: string;
-  label: ReactNode;
-  placeholder: string;
-  options: string[];
-};
-
-function ChevronDown() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-      <path
-        d="m7.5 9.5 4.5 4.25 4.5-4.25"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
+import { FormEvent, useState } from "react";
+import type { SessionUser } from "./Dashboard";
 
 function EyeIcon({ hidden }: { hidden: boolean }) {
   return (
@@ -42,31 +22,10 @@ function EyeIcon({ hidden }: { hidden: boolean }) {
   );
 }
 
-function SelectField({ id, label, placeholder, options }: SelectFieldProps) {
-  return (
-    <div className="field-group">
-      <label htmlFor={id}>{label}</label>
-      <div className="select-wrap">
-        <select id={id} name={id} defaultValue="" required>
-          <option value="" disabled>
-            {placeholder}
-          </option>
-          {options.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
-        <ChevronDown />
-      </div>
-    </div>
-  );
-}
-
 export default function Login({
   onLogin,
 }: {
-  onLogin: (user: { login: string; name: string }) => void;
+  onLogin: (user: SessionUser) => void;
 }) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,9 +45,6 @@ export default function Login({
         body: JSON.stringify({
           login: data.get("login"),
           password: data.get("password"),
-          faculty: data.get("faculty"),
-          course: data.get("course"),
-          group: data.get("group"),
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -191,41 +147,6 @@ export default function Login({
               </button>
             </div>
           </div>
-
-          <SelectField
-            id="faculty"
-            label={
-              <>
-                Факультет
-              </>
-            }
-            placeholder="Оберіть факультет"
-            options={[
-              "Навчально-науковий інститут № 1",
-              "Навчально-науковий інститут № 2",
-              "Навчально-науковий інститут № 3",
-            ]}
-          />
-          <SelectField
-            id="course"
-            label={
-              <>
-                Курс
-              </>
-            }
-            placeholder="Оберіть курс"
-            options={["1 курс", "2 курс", "3 курс", "4 курс", "5 курс"]}
-          />
-          <SelectField
-            id="group"
-            label={
-              <>
-                Група
-              </>
-            }
-            placeholder="Оберіть групу"
-            options={["Група 101", "Група 102", "Група 103", "Група 104"]}
-          />
 
           {error && (
             <p className="auth-error" role="alert">

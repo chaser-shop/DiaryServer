@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Login from "./Login";
 import Dashboard, { type SessionUser } from "./Dashboard";
+import AdminApp from "./admin/AdminApp";
 
 export default function App() {
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -32,5 +33,10 @@ export default function App() {
 
   if (checking) return <div className="min-h-screen" style={{ background: "#071426" }} />;
   if (!user) return <Login onLogin={setUser} />;
+  if (window.location.pathname.replace(/\/+$/, "") === "/admin") {
+    if (user.role === "admin") return <AdminApp adminName={user.name} onLogout={logout} />;
+    window.location.replace("/");
+    return null;
+  }
   return <Dashboard user={user} onLogout={logout} />;
 }
