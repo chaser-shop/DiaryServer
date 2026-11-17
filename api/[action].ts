@@ -373,6 +373,73 @@ async function adminAction(action: string, req: VercelRequest, res: VercelRespon
 }
 
 // ---------------------------------------------------------------------------
+// Дії студента: власні оцінки, редагування, рейтинг групи
+// ---------------------------------------------------------------------------
+const scoresOf = (g: any) =>
+  Object.fromEntries(SUBJECTS.map((k) => [k, Number(g?.[k] ?? 0)])) as Record<SubjectKey, number>;
+
+async function studentAction(action: string, req: VercelRequest, res: VercelResponse, session: Session) {
+  const db = await getDb();
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const student: any = await db.collection("students").findOne({ login: session.login });
+  if (!student) throw new HttpError(404, "Студента не знайдено.");
+  if (student.status === "expelled") throw new HttpError(403, "Доступ закрито");
+
+  let grade: any = await db.collection("grades").findOne({ studentId: student._id });
+  if (!grade) {
+    const doc = {
+      studentId: student._id,
+      studentName: student.fullName,
+      groupId: student.groupId,
+      ...emptyScores(),
+      updatedAt: new Date(),
+    };
+    const { insertedId } = await db.collection("grades").insertOne(doc);
+    grade = { _id: insertedId, ...doc };
+  }
+
+  if (action === "my-grades") {
+    return res.status(200).json({ scores: scoresOf(grade) });
+  }
+
+  if (action === "my-grade-update") {
+    if (req.method !== "POST") throw new HttpError(405, "Method not allowed");
+    const key = String(body.key) as SubjectKey;
+    if (!SUBJECTS.includes(key)) throw new HttpError(400, "Невідома дисципліна.");
+    const raw = Number(body.value);
+    if (!Number.isFinite(raw) || raw < 0 || raw > 100) {
+      throw new HttpError(400, "Оцінка має бути від 0 до 100.");
+    }
+    const value = Math.round(raw);
+    const previous = Number(grade[key] ?? 0);
+    await db
+      .collection("grades")
+      .updateOne({ _id: grade._id }, { $set: { [key]: value, updatedAt: new Date() } });
+    await logActivity(db, student.fullName, {
+      summary: `Студент змінив власну оцінку для ${student.fullName} (${key})`,
+      entityType: "grade",
+      previousValue: String(previous),
+      newValue: String(value),
+    });
+    return res.status(200).json({ ok: true, value });
+  }
+
+  if (action === "group-ratings") {
+    const rows = await db.collection("grades").find({ groupId: student.groupId }).toArray();
+    return res.status(200).json({
+      me: String(student._id),
+      students: rows.map((g: any) => ({
+        id: String(g.studentId),
+        name: g.studentName,
+        scores: scoresOf(g),
+      })),
+    });
+  }
+
+  throw new HttpError(404, "Not found");
+}
+
+// ---------------------------------------------------------------------------
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("Cache-Control", "no-store");
   const action = String(req.query.action);
@@ -428,6 +495,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
       res.setHeader("Set-Cookie", cookie("", 0));
       return res.status(200).json({ ok: true });
+    }
+
+    if (action === "my-grades" || action === "my-grade-update" || action === "group-ratings") {
+      const session = await readSession(req);
+      if (!session) return res.status(401).json({ error: "Потрібен вхід" });
+      if (session.role !== "student") {
+        // Адміністратор не має власних оцінок
+        if (action === "group-ratings") return res.status(200).json({ me: "", students: [] });
+        if (action === "my-grades") return res.status(200).json({ scores: null });
+        return res.status(403).json({ error: "Лише для студентів" });
+      }
+      return await studentAction(action, req, res, session);
     }
 
     if (action.startsWith("admin-")) {

@@ -23,13 +23,16 @@ import {
   Sparkles,
   Star,
   Target,
-  TrendingUp,
+  Trophy,
   UserRound,
   UsersRound,
   X,
   type LucideIcon,
 } from "lucide-react";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import Rating from "./Rating";
+import { fetchMyScores, saveMyScore } from "./ratingApi";
+import { averageScore, formatAverage, SUBJECTS, type Scores, type SubjectKey } from "./subjects";
 
 export type SessionUser = { login: string; name: string; role?: string; group?: string };
 
@@ -91,7 +94,7 @@ const navGroups: NavGroup[] = [
       { id: "overview", label: "Огляд", icon: LayoutDashboard },
       { id: "schedule", label: "Розклад", icon: CalendarDays },
       { id: "homework", label: "Домашні завдання", icon: ClipboardCheck },
-      { id: "grades", label: "Оцінки", icon: TrendingUp },
+      { id: "rating", label: "Рейтинг", icon: Trophy },
     ],
   },
   {
@@ -822,6 +825,8 @@ export default function Dashboard({
   );
   const [expandedSubjectId, setExpandedSubjectId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [scores, setScores] = useState<Scores | null>(null);
+  const [ratingRefresh, setRatingRefresh] = useState(0);
 
   const notificationRef = useRef<HTMLDivElement | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
@@ -831,6 +836,19 @@ export default function Dashboard({
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast(message);
     toastTimerRef.current = setTimeout(() => setToast(null), 3600);
+  };
+
+  const loadScores = useCallback(async () => {
+    const result = await fetchMyScores();
+    if (result.ok) setScores(result.data.scores);
+  }, []);
+
+  const saveScore = async (key: SubjectKey, value: number): Promise<string | null> => {
+    const result = await saveMyScore(key, value);
+    if (!result.ok) return result.error;
+    setScores((current) => (current ? { ...current, [key]: result.data.value } : current));
+    setRatingRefresh((n) => n + 1);
+    return null;
   };
 
   const navigate = (id: string) => {
@@ -890,6 +908,26 @@ export default function Dashboard({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isMobileNavOpen, isNotificationsOpen, isProfileOpen]);
+
+  // Оцінки беруться з бази: оновлюємо при вході, поверненні на вкладку, зміні розділу і раз на 30 с.
+  useEffect(() => {
+    void loadScores();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadScores();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    const timer = window.setInterval(onVisible, 30000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      window.clearInterval(timer);
+    };
+  }, [loadScores]);
+
+  useEffect(() => {
+    void loadScores();
+  }, [activeNavId, loadScores]);
 
   useEffect(() => {
     document.body.style.overflow = isMobileNavOpen ? "hidden" : "";
@@ -989,28 +1027,20 @@ export default function Dashboard({
                 <section className="stats-grid" aria-label="Навчальна статистика">
                   <StatCard
                     label="Середній бал"
-                    value="91.4"
-                    note="+2.8 за місяць"
+                    value={scores ? formatAverage(averageScore(scores)) : "—"}
+                    note={`за ${SUBJECTS.length} дисциплінами`}
                     icon={Target}
                     tone="blue"
                   >
                     <div className="mini-bars" aria-hidden="true">
-                      <i />
-                      <i />
-                      <i />
-                      <i />
-                      <i />
-                    </div>
-                  </StatCard>
-                  <StatCard
-                    label="Відвідуваність"
-                    value="96%"
-                    note="48 із 50 занять"
-                    icon={ShieldCheck}
-                    tone="gold"
-                  >
-                    <div className="ring-progress" aria-hidden="true">
-                      <span />
+                      {SUBJECTS.map((subject) => (
+                        <i
+                          key={subject.key}
+                          style={{
+                            height: `${Math.max(3, Math.round(((scores?.[subject.key] ?? 0) / 100) * 22))}px`,
+                          }}
+                        />
+                      ))}
                     </div>
                   </StatCard>
                   <StatCard
@@ -1067,6 +1097,8 @@ export default function Dashboard({
                   />
                 </div>
               </>
+            ) : activeNavId === "rating" ? (
+              <Rating scores={scores} onSave={saveScore} refreshKey={ratingRefresh} />
             ) : (
               <ComingSoonState label={currentSectionLabel} onBack={() => navigate("overview")} />
             )}
