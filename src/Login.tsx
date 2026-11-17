@@ -93,7 +93,10 @@ export default function Login({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json.error ?? "Не вдалося увійти. Спробуйте пізніше.");
+        setError(
+          (json.error ?? "Не вдалося увійти. Спробуйте пізніше.") +
+            (json.detail ? ` — ${json.detail}` : ""),
+        );
         return;
       }
       onLogin(json.user);

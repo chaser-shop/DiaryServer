@@ -85,6 +85,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = String(req.query.action);
 
   try {
+    if (action === "health") {
+      const env = {
+        MONGODB_URI: !!process.env.MONGODB_URI,
+        JWT_SECRET: !!process.env.JWT_SECRET,
+      };
+      if (!env.MONGODB_URI || !env.JWT_SECRET) return res.status(500).json({ ok: false, env });
+      await getUsers();
+      return res.status(200).json({ ok: true, env, mongo: "connected" });
+    }
+
     if (action === "login") {
       if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
       const { login, password } = (req.body ?? {}) as { login?: unknown; password?: unknown };
@@ -120,6 +130,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(404).json({ error: "Not found" });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: "Помилка сервера" });
+    const msg = err instanceof Error ? err.message : String(err);
+    let error = "Помилка сервера";
+    if (/MONGODB_URI is not set/.test(msg)) error = "На сервері не задано MONGODB_URI";
+    else if (/JWT_SECRET is not set/.test(msg)) error = "На сервері не задано JWT_SECRET";
+    else if (/ssl|tls|ECONNREFUSED|ENOTFOUND|timed out|Server selection|whitelist|IP/i.test(msg))
+      error = "Немає підключення до MongoDB (перевірте Network Access в Atlas і MONGODB_URI)";
+    else if (/auth|Authentication/i.test(msg))
+      error = "MongoDB: невірний користувач/пароль у MONGODB_URI";
+    return res.status(500).json({ error, detail: msg.slice(0, 200) });
   }
 }
