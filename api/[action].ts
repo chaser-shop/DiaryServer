@@ -25,8 +25,15 @@ function getUsers(): Promise<Collection<UserDoc>> {
     if (!uri) throw new Error("MONGODB_URI is not set");
     globalForMongo.__navsMongo = (async () => {
       const client = await new MongoClient(uri).connect();
-      const users = client.db(process.env.MONGODB_DB || "navs").collection<UserDoc>("users");
-      await users.createIndex({ login: 1 }, { unique: true });
+      const users = client.db(process.env.MONGODB_DB || "navs-era").collection<UserDoc>("users");
+      // Унікальний індекс лише для документів, де login — рядок (старі записи без login ігноруються).
+      // Помилка індексу не повинна блокувати вхід.
+      await users
+        .createIndex(
+          { login: 1 },
+          { unique: true, partialFilterExpression: { login: { $type: "string" } } },
+        )
+        .catch((e) => console.warn("createIndex skipped:", e instanceof Error ? e.message : e));
       // Початковий користувач: admin / admin123 (створюється один раз)
       await users.updateOne(
         { login: "admin" },

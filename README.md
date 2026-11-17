@@ -8,7 +8,7 @@ Vite + React (фронтенд) і Vercel Serverless Functions + MongoDB (авт
 | Змінна | Опис |
 | --- | --- |
 | `MONGODB_URI` | рядок підключення MongoDB Atlas |
-| `MONGODB_DB` | назва бази (необовʼязково, за замовчуванням `navs`) |
+| `MONGODB_DB` | назва бази (необовʼязково, за замовчуванням `navs-era`) |
 | `JWT_SECRET` | довгий випадковий рядок (`openssl rand -base64 48`) |
 
 У MongoDB Atlas: Network Access → дозволити `0.0.0.0/0` (Vercel не має фіксованого IP).
