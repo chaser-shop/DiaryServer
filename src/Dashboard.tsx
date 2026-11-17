@@ -96,11 +96,12 @@ type HomeworkItem = {
 type SubjectItem = {
   id: string;
   name: string;
+  /** Оцінка з рейтингу (0–100); null, якщо оцінки недоступні */
+  score: number | null;
   teacher: string;
-  progress: number;
-  completed: number;
-  total: number;
   nextClass: string;
+  /** Посилання на пару цього предмета (задає адмін) */
+  link: string;
   code: string;
 };
 
@@ -170,49 +171,6 @@ const homeworkItems: HomeworkItem[] = [
     subject: "Кібербезпека",
     task: "Тест: основи цифрової криміналістики",
     due: "Виконано 11 березня",
-  },
-];
-
-const subjects: SubjectItem[] = [
-  {
-    id: "criminal-law",
-    name: "Кримінальне право",
-    teacher: "Ірина Мельник",
-    progress: 86,
-    completed: 12,
-    total: 14,
-    nextClass: "Сьогодні, 10:30",
-    code: "КП",
-  },
-  {
-    id: "criminalistics",
-    name: "Криміналістика",
-    teacher: "Андрій Бондар",
-    progress: 72,
-    completed: 10,
-    total: 14,
-    nextClass: "Понеділок, 09:00",
-    code: "КР",
-  },
-  {
-    id: "tactical-training",
-    name: "Тактико-спеціальна підготовка",
-    teacher: "Сергій Литвин",
-    progress: 64,
-    completed: 9,
-    total: 14,
-    nextClass: "Понеділок, 13:10",
-    code: "ТП",
-  },
-  {
-    id: "cybersecurity",
-    name: "Кібербезпека",
-    teacher: "Наталія Савчук",
-    progress: 58,
-    completed: 7,
-    total: 12,
-    nextClass: "Вівторок, 11:50",
-    code: "КБ",
   },
 ];
 
@@ -787,12 +745,14 @@ function SubjectsCard({
   items,
   expandedId,
   onExpand,
-  onOpenMaterials,
+  onOpenLink,
+  onOpenRating,
 }: {
   items: SubjectItem[];
   expandedId: string | null;
   onExpand: (id: string) => void;
-  onOpenMaterials: () => void;
+  onOpenLink: (url: string) => void;
+  onOpenRating: () => void;
 }) {
   return (
     <section className="glass-panel content-card subjects-card" aria-labelledby="subjects-heading">
@@ -803,8 +763,8 @@ function SubjectsCard({
             Мої предмети
           </h2>
         </div>
-        <button type="button" className="header-link">
-          Переглянути всі
+        <button type="button" className="header-link" onClick={onOpenRating}>
+          Відкрити рейтинг
           <ChevronRight size={14} />
         </button>
       </div>
@@ -825,15 +785,15 @@ function SubjectsCard({
                   aria-controls={`subject-${subject.id}`}
                   onClick={() => onExpand(subject.id)}
                 >
-                  <span className={`subject-code subject-code-${index + 1}`}>{subject.code}</span>
+                  <span className={`subject-code subject-code-${(index % 4) + 1}`}>{subject.code}</span>
                   <span className="subject-primary">
                     <span className="subject-title-row">
                       <strong>{subject.name}</strong>
-                      <span>{subject.progress}%</span>
+                      <span>{subject.score === null ? "—" : `${subject.score} / 100`}</span>
                     </span>
                     <span className="subject-teacher">{subject.teacher}</span>
                     <span className="progress-track" aria-hidden="true">
-                      <span style={{ width: `${subject.progress}%` }} />
+                      <span style={{ width: `${subject.score ?? 0}%` }} />
                     </span>
                   </span>
                   <ChevronDown
@@ -844,19 +804,24 @@ function SubjectsCard({
                 {expanded && (
                   <div className="subject-details" id={`subject-${subject.id}`}>
                     <div>
-                      <span>Завершено тем</span>
-                      <strong>
-                        {subject.completed} з {subject.total}
-                      </strong>
+                      <span>Моя оцінка</span>
+                      <strong>{subject.score === null ? "—" : `${subject.score} зі 100`}</strong>
                     </div>
                     <div>
                       <span>Наступне заняття</span>
                       <strong>{subject.nextClass}</strong>
                     </div>
-                    <button type="button" onClick={onOpenMaterials}>
-                      Відкрити матеріали
-                      <ChevronRight size={14} />
-                    </button>
+                    {subject.link ? (
+                      <button type="button" onClick={() => onOpenLink(subject.link)}>
+                        Приєднатись до заняття
+                        <ChevronRight size={14} />
+                      </button>
+                    ) : (
+                      <button type="button" onClick={onOpenRating}>
+                        Змінити оцінку в рейтингу
+                        <ChevronRight size={14} />
+                      </button>
+                    )}
                   </div>
                 )}
               </article>
@@ -1007,6 +972,25 @@ export default function Dashboard({
         `${item.subject} ${item.task}`.toLocaleLowerCase("uk").includes(normalizedQuery),
       )
     : homeworkItems;
+  const scheduleLessons = groupInfo?.schedule?.lessons ?? null;
+  const subjects: SubjectItem[] = SUBJECTS.map((subject) => {
+    const lessons = (scheduleLessons ?? []).filter((lesson) => lesson.subjectKey === subject.key);
+    const teachers = Array.from(new Set(lessons.map((lesson) => lesson.teacher).filter(Boolean)));
+    const next = findNextLesson(lessons, now);
+    return {
+      id: subject.key,
+      name: subject.label,
+      code: subject.label.slice(0, 2).toUpperCase(),
+      score: scores ? scores[subject.key] : null,
+      teacher: teachers.join(", ") || (scheduleLessons ? "Викладача не вказано" : "Розклад не завантажено"),
+      nextClass: next
+        ? `${dayLabel(next.lesson.date, now.date)}, ${next.lesson.start}`
+        : scheduleLessons
+          ? "Немає в розкладі"
+          : "Розклад не завантажено",
+      link: groupInfo?.subjectLinks.find((link) => link.key === subject.key)?.url ?? "",
+    };
+  });
   const filteredSubjects = normalizedQuery
     ? subjects.filter((item) =>
         `${item.name} ${item.teacher}`.toLocaleLowerCase("uk").includes(normalizedQuery),
@@ -1241,9 +1225,8 @@ export default function Dashboard({
                       onExpand={(id) =>
                         setExpandedSubjectId((current) => (current === id ? null : id))
                       }
-                      onOpenMaterials={() =>
-                        showToast("Навчальні матеріали відкриються в повній версії порталу.")
-                      }
+                      onOpenLink={(url) => window.open(url, "_blank", "noopener,noreferrer")}
+                      onOpenRating={() => navigate("rating")}
                     />
                   </div>
                   <HomeworkCard
