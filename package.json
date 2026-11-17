@@ -1,23 +1,32 @@
 {
-  "name": "diary-web",
-  "version": "2.0.0",
-  "description": "Щоденник студента та електронний журнал успішності — вебверсія й сервер (Node.js + MongoDB + Web Push)",
-  "main": "server.js",
+  "name": "navs-diary",
+  "version": "1.0.0",
   "private": true,
-  "engines": {
-    "node": ">=18.17"
-  },
+  "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "test": "node --test test/*.test.js",
-    "dev:memory": "node scripts/dev-memory.js",
-    "make-admin": "node scripts/make-admin.js"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "seed": "node --env-file=.env.local scripts/seed.mjs"
   },
   "dependencies": {
-    "mongodb": "^6.8.0",
-    "web-push": "^3.6.7"
+    "bcryptjs": "^2.4.3",
+    "jose": "^5.9.6",
+    "lucide-react": "^1.74.0",
+    "mongodb": "^6.10.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "mongodb-memory-server-core": "^10.4.3"
-  }
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vercel/node": "^3.2.0",
+    "@vitejs/plugin-react": "^6.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^8.0.5"
+  },
+  "engines": { "node": ">=20" }
 }

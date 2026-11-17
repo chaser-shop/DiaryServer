@@ -1,0 +1,603 @@
+.auth-screen {
+  position: relative;
+  display: grid;
+  min-height: 100svh;
+  place-items: center;
+  overflow: hidden;
+  padding: 28px 20px;
+  isolation: isolate;
+  background:
+    linear-gradient(
+      120deg,
+      rgba(20, 49, 78, 0.12),
+      transparent 34%,
+      transparent 66%,
+      rgba(19, 55, 87, 0.1)
+    ),
+    linear-gradient(180deg, rgba(31, 58, 84, 0.08) 0%, rgba(2, 7, 14, 0.56) 100%),
+    radial-gradient(ellipse at 50% 42%, #142b43 0%, #0b1d35 40%, #071426 68%, #030911 100%);
+}
+
+.auth-screen::before {
+  position: absolute;
+  z-index: -3;
+  inset: 0;
+  content: "";
+  opacity: 0.44;
+  background-image:
+    linear-gradient(rgba(168, 196, 222, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(168, 196, 222, 0.045) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(to bottom, transparent, black 22%, black 70%, transparent);
+}
+
+.auth-screen::after {
+  position: absolute;
+  z-index: -2;
+  width: min(82vw, 1180px);
+  height: 690px;
+  top: 50%;
+  left: 50%;
+  content: "";
+  transform: translate(-50%, -50%);
+  opacity: 0.52;
+  border: 1px solid rgba(197, 219, 239, 0.11);
+  clip-path: polygon(50% 0, 96% 25%, 91% 100%, 9% 100%, 4% 25%);
+  background:
+    linear-gradient(90deg, transparent 49.88%, rgba(83, 161, 226, 0.21) 50%, transparent 50.12%),
+    repeating-linear-gradient(90deg, transparent 0 9.8%, rgba(190, 215, 238, 0.06) 10% 10.12%);
+}
+
+.architecture {
+  position: absolute;
+  z-index: -1;
+  bottom: 0;
+  width: 32vw;
+  max-width: 470px;
+  min-width: 280px;
+  height: 69vh;
+  min-height: 540px;
+  opacity: 0.46;
+  border-top: 1px solid rgba(199, 218, 236, 0.2);
+  background:
+    linear-gradient(180deg, transparent 0 10%, rgba(24, 55, 84, 0.13) 10% 10.3%, transparent 10.3%),
+    linear-gradient(135deg, rgba(31, 65, 96, 0.44), rgba(7, 15, 25, 0.06));
+}
+
+.architecture-left {
+  left: -6vw;
+  transform: skewX(-8deg);
+  border-right: 1px solid rgba(194, 211, 226, 0.16);
+}
+
+.architecture-right {
+  right: -6vw;
+  transform: skewX(8deg);
+  border-left: 1px solid rgba(194, 211, 226, 0.16);
+}
+
+.architecture span {
+  position: absolute;
+  top: 16%;
+  bottom: 0;
+  width: 14%;
+  border-inline: 1px solid rgba(181, 199, 217, 0.12);
+  background: linear-gradient(90deg, transparent, rgba(152, 174, 197, 0.035), transparent);
+}
+
+.architecture span:nth-child(1) {
+  left: 8%;
+}
+.architecture span:nth-child(2) {
+  left: 32%;
+}
+.architecture span:nth-child(3) {
+  left: 58%;
+}
+.architecture span:nth-child(4) {
+  left: 82%;
+}
+
+.horizon-line {
+  position: absolute;
+  z-index: -1;
+  right: 0;
+  bottom: 11%;
+  left: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(65, 148, 219, 0.48),
+    rgba(224, 236, 246, 0.25),
+    rgba(65, 148, 219, 0.48),
+    transparent
+  );
+}
+
+.shield-frame {
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  left: 50%;
+  width: min(58vw, 820px);
+  height: min(78vh, 710px);
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(120, 179, 226, 0.09);
+  clip-path: polygon(50% 0, 94% 17%, 88% 77%, 50% 100%, 12% 77%, 6% 17%);
+  background: linear-gradient(
+    90deg,
+    rgba(37, 133, 216, 0.025),
+    transparent 28%,
+    transparent 72%,
+    rgba(37, 133, 216, 0.025)
+  );
+}
+
+.shield-frame i {
+  position: absolute;
+  display: block;
+  background: linear-gradient(90deg, transparent, rgba(137, 190, 232, 0.22), transparent);
+}
+
+.shield-frame i:nth-child(1) {
+  top: 17%;
+  right: 10%;
+  left: 10%;
+  height: 1px;
+}
+
+.shield-frame i:nth-child(2) {
+  top: 50%;
+  bottom: 8%;
+  left: 50%;
+  width: 1px;
+  background: linear-gradient(transparent, rgba(137, 190, 232, 0.18), transparent);
+}
+
+.shield-frame i:nth-child(3) {
+  right: 20%;
+  bottom: 22%;
+  left: 20%;
+  height: 1px;
+}
+
+.auth-card {
+  position: relative;
+  width: min(100%, 600px);
+  overflow: hidden;
+  padding: 24px 50px 30px;
+  border: 1px solid rgba(204, 226, 245, 0.29);
+  border-radius: 26px;
+  background:
+    linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.105),
+      rgba(255, 255, 255, 0.025) 28%,
+      rgba(3, 14, 27, 0.12) 70%
+    ),
+    rgba(7, 20, 38, 0.72);
+  box-shadow:
+    0 40px 110px rgba(0, 0, 0, 0.52),
+    0 10px 35px rgba(0, 10, 24, 0.46),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 0 rgba(37, 133, 216, 0.06),
+    0 0 0 1px rgba(55, 137, 205, 0.045);
+  backdrop-filter: blur(32px) saturate(145%);
+}
+
+.auth-card::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      118deg,
+      rgba(255, 255, 255, 0.1),
+      transparent 18%,
+      transparent 74%,
+      rgba(52, 120, 212, 0.055)
+    ),
+    linear-gradient(180deg, rgba(75, 163, 228, 0.045), transparent 24%);
+}
+
+.auth-card::after {
+  position: absolute;
+  z-index: -1;
+  right: 12%;
+  bottom: -18px;
+  left: 12%;
+  height: 34px;
+  content: "";
+  border-radius: 50%;
+  background: rgba(20, 79, 134, 0.18);
+  filter: blur(18px);
+}
+
+.card-reflection {
+  position: absolute;
+  top: 0;
+  right: 7%;
+  left: 7%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(215, 238, 255, 0.82),
+    rgba(78, 163, 225, 0.4),
+    transparent
+  );
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.emblem {
+  position: relative;
+  width: 112px;
+  height: 112px;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.42))
+    drop-shadow(0 0 11px rgba(80, 156, 219, 0.32));
+}
+
+.emblem::before {
+  position: absolute;
+  z-index: -1;
+  inset: -8px;
+  content: "";
+  border: 1px solid rgba(194, 222, 245, 0.14);
+  border-radius: 50%;
+  background: rgba(197, 222, 242, 0.035);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 0 26px rgba(37, 133, 216, 0.13);
+}
+
+.emblem img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.brand-copy {
+  margin-top: 10px;
+}
+
+.auth-eyebrow {
+  margin: 0 0 6px;
+  color: #7bb8e9;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.auth-eyebrow span {
+  color: #c7d3e0;
+  opacity: 0.55;
+}
+
+.brand h1 {
+  margin: 0;
+  color: #f3f6fa;
+  font-family: "Unbounded", sans-serif;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+  line-height: 1.4;
+  text-shadow: 0 2px 18px rgba(120, 180, 228, 0.09);
+}
+
+.subtitle {
+  margin: 6px 0 0;
+  color: #a8bacb;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  height: 1px;
+  margin: 16px 0 14px;
+  background: linear-gradient(90deg, transparent, rgba(156, 200, 235, 0.2), transparent);
+}
+
+.divider span {
+  display: block;
+  width: 44px;
+  height: 1px;
+  margin: auto;
+  background: linear-gradient(90deg, #3478d4, #b4d7ee, #3478d4);
+  box-shadow: 0 0 10px rgba(52, 120, 212, 0.28);
+}
+
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field-group label {
+  color: #bdcad7;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.085em;
+  line-height: 1.3;
+}
+
+.field-group label span {
+  color: #5da5dc;
+}
+
+.field-group input,
+.field-group select {
+  width: 100%;
+  height: 45px;
+  outline: none;
+  border: 1px solid rgba(172, 207, 235, 0.2);
+  border-radius: 11px;
+  background:
+    linear-gradient(110deg, rgba(255, 255, 255, 0.035), transparent 30%), rgba(2, 11, 22, 0.45);
+  color: #eef3f8;
+  font-size: 13px;
+  font-weight: 400;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+  backdrop-filter: blur(12px);
+}
+
+.field-group input {
+  padding: 0 14px;
+}
+
+.field-group select {
+  cursor: pointer;
+  appearance: none;
+  padding: 0 42px 0 14px;
+}
+
+.field-group input::placeholder,
+.field-group select:invalid {
+  color: #71879b;
+  opacity: 1;
+}
+
+.field-group input:hover,
+.field-group select:hover {
+  border-color: rgba(118, 184, 231, 0.4);
+  background-color: rgba(8, 25, 43, 0.62);
+}
+
+.field-group input:focus,
+.field-group select:focus {
+  border-color: rgba(66, 151, 218, 0.9);
+  background-color: rgba(7, 25, 44, 0.82);
+  box-shadow:
+    0 0 0 3px rgba(37, 133, 216, 0.13),
+    0 0 18px rgba(37, 133, 216, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.password-wrap,
+.select-wrap {
+  position: relative;
+}
+
+.password-wrap input {
+  padding-right: 46px;
+}
+
+.visibility-button {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  transform: translateY(-50%);
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #7794ad;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease;
+}
+
+.visibility-button:hover,
+.visibility-button:focus-visible {
+  outline: none;
+  background: rgba(80, 155, 214, 0.11);
+  color: #b9d9f0;
+}
+
+.visibility-button svg,
+.select-wrap svg {
+  width: 18px;
+  height: 18px;
+}
+
+.select-wrap > svg {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  pointer-events: none;
+  transform: translateY(-50%);
+  color: #7fa7c6;
+}
+
+.field-group option {
+  background: #0d1a28;
+  color: #e7edf3;
+}
+
+.login-button {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 51px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  overflow: hidden;
+  margin-top: 6px;
+  border: 1px solid rgba(176, 220, 249, 0.35);
+  border-radius: 12px;
+  background: linear-gradient(104deg, #174f94 0%, #2585d8 48%, #238fc2 100%);
+  box-shadow:
+    0 12px 30px rgba(8, 57, 108, 0.36),
+    0 0 22px rgba(37, 133, 216, 0.09),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -1px 0 rgba(0, 35, 77, 0.28);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  transition:
+    transform 160ms ease,
+    filter 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.login-button::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  transform: translateX(-100%);
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+  transition: transform 500ms ease;
+}
+
+.login-button:hover {
+  filter: brightness(1.08);
+  box-shadow:
+    0 15px 36px rgba(5, 52, 102, 0.48),
+    0 0 25px rgba(37, 133, 216, 0.13),
+    inset 0 1px 0 rgba(255, 255, 255, 0.31);
+  transform: translateY(-1px);
+}
+
+.login-button:hover::before {
+  transform: translateX(100%);
+}
+
+.login-button:active {
+  transform: translateY(0);
+}
+
+.login-button:focus-visible {
+  outline: 2px solid #91b8e7;
+  outline-offset: 3px;
+}
+
+.login-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+@media (max-width: 620px) {
+  .auth-screen {
+    align-items: start;
+    overflow-y: auto;
+    padding: 16px 12px;
+  }
+
+  .auth-card {
+    padding: 20px 20px 23px;
+    border-radius: 22px;
+  }
+
+  .architecture {
+    opacity: 0.18;
+  }
+
+  .emblem {
+    width: 92px;
+    height: 92px;
+  }
+
+  .brand-copy {
+    margin-top: 10px;
+  }
+
+  .brand h1 {
+    font-size: clamp(13px, 3.8vw, 15px);
+  }
+
+  .auth-eyebrow {
+    font-size: 7px;
+  }
+
+  .divider {
+    margin: 15px 0 14px;
+  }
+
+  form {
+    gap: 9px;
+  }
+
+  .field-group input,
+  .field-group select {
+    height: 43px;
+  }
+
+  .login-button {
+    height: 47px;
+    margin-top: 4px;
+  }
+}
+
+@media (max-height: 780px) and (min-width: 621px) {
+  .auth-screen {
+    align-items: start;
+    overflow-y: auto;
+    padding-block: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.auth-error {
+  margin: 2px 0 0;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 120, 120, 0.35);
+  border-radius: 8px;
+  background: rgba(120, 20, 30, 0.28);
+  color: #ffb4b4;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.login-button:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
