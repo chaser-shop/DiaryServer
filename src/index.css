@@ -1377,6 +1377,17 @@
   font-variant-numeric: tabular-nums;
 }
 
+.subject-grade {
+  margin-left: 6px;
+  border-radius: 6px;
+  padding: 1px 5px;
+  background: rgba(52, 120, 212, 0.18);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  color: #a9cdf8;
+}
+
 .subject-teacher {
   display: block;
   margin-top: 3px;

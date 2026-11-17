@@ -52,6 +52,7 @@ import {
 import {
   averageScore,
   formatAverage,
+  gradeOf,
   groupRank,
   SUBJECTS,
   type Scores,
@@ -789,7 +790,12 @@ function SubjectsCard({
                   <span className="subject-primary">
                     <span className="subject-title-row">
                       <strong>{subject.name}</strong>
-                      <span>{subject.score === null ? "—" : `${subject.score} / 100`}</span>
+                      <span>
+                        {subject.score === null ? "—" : `${subject.score} / 100`}
+                        {gradeOf(subject.score) && (
+                          <em className="subject-grade">{gradeOf(subject.score)}</em>
+                        )}
+                      </span>
                     </span>
                     <span className="subject-teacher">{subject.teacher}</span>
                     <span className="progress-track" aria-hidden="true">
@@ -805,7 +811,10 @@ function SubjectsCard({
                   <div className="subject-details" id={`subject-${subject.id}`}>
                     <div>
                       <span>Моя оцінка</span>
-                      <strong>{subject.score === null ? "—" : `${subject.score} зі 100`}</strong>
+                      <strong>
+                        {subject.score === null ? "—" : `${subject.score} зі 100`}
+                        {gradeOf(subject.score) ? ` · оцінка ${gradeOf(subject.score)}` : ""}
+                      </strong>
                     </div>
                     <div>
                       <span>Наступне заняття</span>

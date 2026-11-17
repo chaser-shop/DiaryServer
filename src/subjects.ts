@@ -34,3 +34,17 @@ export function groupRank(
   const better = students.filter((student) => sum(student.scores) > mine).length;
   return { rank: better + 1, total: students.length, hasScores: mine > 0 };
 }
+
+/**
+ * Оцінка за шкалою: 60–63 → 3-, 64–74 → 3, 75–81 → 4, 82–89 → 4+, 90–100 → 5.
+ * Нижче 60 шкала не задана — повертає null.
+ */
+export function gradeOf(score: number | null | undefined): string | null {
+  if (score === null || score === undefined || !Number.isFinite(score)) return null;
+  if (score >= 90) return "5";
+  if (score >= 82) return "4+";
+  if (score >= 75) return "4";
+  if (score >= 64) return "3";
+  if (score >= 60) return "3-";
+  return null;
+}
