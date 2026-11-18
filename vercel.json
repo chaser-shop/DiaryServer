@@ -3,5 +3,32 @@
   "framework": "vite",
   "buildCommand": "vite build",
   "outputDirectory": "dist",
-  "rewrites": [{ "source": "/((?!api/|assets/).*)", "destination": "/index.html" }]
+  "rewrites": [
+    {
+      "source": "/((?!api/|assets/|diary-sw\\.js$|diary\\.webmanifest$).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "functions": {
+    "api/lesson-reminders.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "lesson-reminders"
+        }
+      ]
+    },
+    "api/portal-sync.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "navs-group-sync"
+        }
+      ],
+      "maxDuration": 180
+    },
+    "api/admin-portal.ts": {
+      "maxDuration": 180
+    }
+  }
 }

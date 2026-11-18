@@ -1,3 +1,5 @@
+import { Composer, DiarySettings, Schedule, type Homework } from "./DiaryTabs";
+import { request } from "./ratingApi";
 import {
   Bell,
   BookOpen,
@@ -86,14 +88,6 @@ type NavGroup = {
   items: NavItem[];
 };
 
-type HomeworkItem = {
-  id: string;
-  subject: string;
-  task: string;
-  due: string;
-  priority?: "high" | "normal";
-};
-
 type SubjectItem = {
   id: string;
   name: string;
@@ -138,40 +132,6 @@ const navGroups: NavGroup[] = [
       { id: "settings", label: "Налаштування", icon: Settings },
       { id: "help", label: "Допомога", icon: CircleHelp },
     ],
-  },
-];
-
-const homeworkItems: HomeworkItem[] = [
-  {
-    id: "crime-scene",
-    subject: "Криміналістика",
-    task: "Практикум: огляд місця події",
-    due: "Сьогодні, 18:00",
-    priority: "high",
-  },
-  {
-    id: "administrative-law",
-    subject: "Адміністративне право",
-    task: "Опрацювати статті 23–31",
-    due: "Завтра, 12:00",
-  },
-  {
-    id: "tactical",
-    subject: "Тактико-спеціальна підготовка",
-    task: "Підготувати алгоритм дій групи",
-    due: "17 березня",
-  },
-  {
-    id: "english",
-    subject: "Професійна англійська",
-    task: "Unit 7: Incident report",
-    due: "Виконано 12 березня",
-  },
-  {
-    id: "cyber-test",
-    subject: "Кібербезпека",
-    task: "Тест: основи цифрової криміналістики",
-    due: "Виконано 11 березня",
   },
 ];
 
@@ -354,7 +314,7 @@ function TopBar({
           <Menu size={20} />
         </IconButton>
         <div className="min-w-0">
-          <p className="eyebrow">П’ятниця, 14 березня</p>
+          <p className="eyebrow">{new Intl.DateTimeFormat("uk-UA",{weekday:"long",day:"numeric",month:"long",timeZone:"Europe/Kyiv"}).format(new Date())}</p>
           <h1 className="page-title">Вітаємо, {user.name.split(" ")[0]}</h1>
           <p className="page-subtitle">Ось ваш навчальний ритм на сьогодні</p>
         </div>
@@ -672,11 +632,13 @@ function NextClassCard({
 }
 
 function HomeworkCard({
-  items,
+  items, open, status,
   completedIds,
   onToggle,
 }: {
-  items: HomeworkItem[];
+  items: Homework[];
+  open?: () => void;
+  status: string;
   completedIds: Set<string>;
   onToggle: (id: string) => void;
 }) {
@@ -684,13 +646,13 @@ function HomeworkCard({
     <section className="glass-panel content-card homework-card" aria-labelledby="homework-heading">
       <div className="content-card-header">
         <div>
-          <p className="section-kicker">Цього тижня</p>
+          <p className="section-kicker">Для вашої групи</p>
           <h2 id="homework-heading" className="section-title">
             Домашні завдання
           </h2>
         </div>
         <span className="task-counter">
-          {completedIds.size}/{homeworkItems.length}
+          {items.filter(i => completedIds.has(i.id)).length}/{items.length}
         </span>
       </div>
 
@@ -716,28 +678,27 @@ function HomeworkCard({
                 <div className="min-w-0 flex-1">
                   <div className="task-subject-row">
                     <p className="task-subject">{item.subject}</p>
-                    {item.priority === "high" && !completed && (
-                      <span className="priority-badge">Терміново</span>
-                    )}
+
                   </div>
                   <p className="task-name">{item.task}</p>
                   <p className="task-due">
                     <Clock3 size={12} />
-                    {item.due}
+                    {longDate(item.due)}
                   </p>
+                  {item.files.map((name,i) => <a className="diary-file" key={i} href={`/api/diary-file?id=${item.id}&index=${i}`}>{name}</a>)}
                 </div>
               </li>
             );
           })}
         </ul>
       ) : (
-        <EmptySearchState label="завдань" />
+        <p role="status">{status || "Завдань для показу немає."}</p>
       )}
 
-      <button type="button" className="text-button">
+      {open && <button type="button" onClick={open} className="text-button">
         Усі завдання
         <ChevronRight size={15} />
-      </button>
+      </button>}
     </section>
   );
 }
@@ -891,7 +852,10 @@ export default function Dashboard({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [completedHomeworkIds, setCompletedHomeworkIds] = useState(
-    () => new Set(["english", "cyber-test"]),
+    () => {
+      try { return new Set<string>(JSON.parse(localStorage.getItem("done:" + user.login) || "[]")); }
+      catch { return new Set<string>(); }
+    },
   );
   const [expandedSubjectId, setExpandedSubjectId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -932,11 +896,19 @@ export default function Dashboard({
     if (result.ok) setRank(groupRank(result.data.students, result.data.me));
   }, []);
 
+  const [homeworkItems,setHomework] = useState<Homework[]>([]);
+  const [homeworkStatus,setHomeworkStatus] = useState("Завантаження…");
+  const loadHomework = useCallback(async () => {
+    const r = await request<Homework[]>("diary-homework");
+    if (r.ok) setHomework(r.data);
+    setHomeworkStatus(r.ok ? "" : r.error);
+  }, []);
   const refresh = useCallback(() => {
+    void loadHomework();
     void loadScores();
     void loadGroup();
     void loadRank();
-  }, [loadScores, loadGroup, loadRank]);
+  }, [loadScores, loadGroup, loadRank, loadHomework]);
 
   const saveScore = async (key: SubjectKey, value: number): Promise<string | null> => {
     const result = await saveMyScore(key, value);
@@ -971,6 +943,7 @@ export default function Dashboard({
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      localStorage.setItem("done:" + user.login, JSON.stringify([...next]));
       return next;
     });
   };
@@ -1239,12 +1212,19 @@ export default function Dashboard({
                     />
                   </div>
                   <HomeworkCard
-                    items={filteredHomework}
+                    items={filteredHomework} open={() => navigate("homework")} status={homeworkStatus}
                     completedIds={completedHomeworkIds}
                     onToggle={toggleHomework}
                   />
                 </div>
               </>
+            ) : activeNavId === "schedule" ? (
+              <Schedule lessons={scheduleLessons} now={now} failed={groupInfoFailed}/>
+            ) : activeNavId === "settings" ? (
+              <DiarySettings/>
+            ) : activeNavId === "homework" ? (
+              <><Composer lessons={scheduleLessons ?? []} now={now} saved={loadHomework}/>
+              <HomeworkCard items={filteredHomework} status={homeworkStatus} completedIds={completedHomeworkIds} onToggle={toggleHomework}/></>
             ) : activeNavId === "rating" ? (
               <Rating scores={scores} onSave={saveScore} refreshKey={ratingRefresh} />
             ) : (

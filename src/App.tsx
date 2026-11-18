@@ -25,6 +25,13 @@ export default function App() {
 
   const logout = async () => {
     try {
+      const reg = await navigator.serviceWorker?.getRegistration().catch(() => undefined);
+      const sub = await reg?.pushManager?.getSubscription().catch(() => null);
+      if (sub) {
+        await fetch("/api/diary-device", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint: sub.endpoint, remove: true }) }).catch(() => {});
+        await sub.unsubscribe().catch(() => {});
+      }
       await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
     } finally {
       setUser(null);

@@ -1,3 +1,4 @@
+import { PortalScheduleCard } from "./PortalScheduleCard";
 import {
   Activity,
   Archive,
@@ -67,6 +68,7 @@ export type AcademyGroup = {
   /** Посилання, куди приєднуватись на пари, за предметами */
   subjectLinks?: SubjectLink[]
   /** Розклад, завантажений з Excel */
+  portal?: {values:string[]; labels:string[]; checkedAt:string; error:string} | null
   schedule?: GroupSchedule | null
 }
 
@@ -557,12 +559,13 @@ export default function AcademyDashboard({
                   />
                 )}
                 {section === 'schedule' && (
+                  <>{selectedGroup && <PortalScheduleCard key={selectedGroup.id} group={selectedGroup} onSaved={replaceGroup}/>}
                   <ScheduleSection
                     group={selectedGroup}
                     groups={groups}
                     onSelectGroup={setSelectedGroupId}
                     onOpenSettings={openGroupSettings}
-                  />
+                  /></>
                 )}
                 {section === 'analytics' && (
                   <AnalyticsSection grades={grades} groups={groups} />
@@ -967,7 +970,7 @@ function GroupsSection({
           <RankingTable rows={grades} group={selectedGroup} updateScore={updateScore} />
         )}
         {tab === 'schedule' && (
-          <ScheduleSection group={selectedGroup} onOpenSettings={() => setTab('settings')} />
+          <><PortalScheduleCard key={selectedGroup.id} group={selectedGroup} onSaved={onGroupSaved}/><ScheduleSection group={selectedGroup} onOpenSettings={() => setTab('settings')} /></>
         )}
         {tab === 'settings' && (
           <>
@@ -1718,7 +1721,7 @@ function ScheduleSection({
         {heading}
         <EmptyState
           title="Розклад ще не завантажено"
-          description="Завантажте Excel-файл у параметрах групи — після цього студенти побачать «Наступну пару»."
+          description="Підключіть портал НАВС у вкладці «Розклад» групи або завантажте Excel у параметрах групи."
         />
       </section>
     )
