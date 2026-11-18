@@ -17,6 +17,20 @@
           "topic": "lesson-reminders"
         }
       ]
+    },
+    "api/portal-sync.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "navs-group-sync"
+        }
+      ],
+      "maxDuration": 180,
+      "includeFiles": "node_modules/@sparticuz/chromium/bin/**"
+    },
+    "api/admin-portal.ts": {
+      "maxDuration": 180,
+      "includeFiles": "node_modules/@sparticuz/chromium/bin/**"
     }
   }
 }

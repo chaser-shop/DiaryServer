@@ -1,68 +1,294 @@
 .diary-panel {
-  max-width: 58rem;
+  max-width: 48rem;
+  min-width: 0;
   margin-bottom: 1rem;
   display: grid;
-  gap: 1rem;
-  color: #e8f1fe;
+  gap: 18px;
+  color: var(--paper);
 }
-.diary-panel h2 {
-  font-size: 1.45rem;
-  font-weight: 700;
+.diary-heading,
+.diary-subheading,
+.diary-quiet,
+.agenda-controls,
+.agenda-controls > div,
+.agenda-info > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
 }
-.diary-panel h3 {
-  font-size: 1.05rem;
-  font-weight: 600;
+.diary-symbol {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(140deg, #3478d431, #142b4580);
+  color: #9fcaff;
+  border: 1px solid var(--border-bright);
+  width: 39px;
+  height: 39px;
+  border-radius: 13px;
+  flex: none;
+}
+.diary-heading {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
 }
 .diary-panel form,
 .diary-panel label {
   display: grid;
-  gap: 0.55rem;
+  gap: 7px;
+  min-width: 0;
 }
 .diary-panel form {
-  gap: 1rem;
+  gap: 15px;
+}
+.diary-panel label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
 }
 .diary-panel label:has(input[type="checkbox"]) {
   display: flex;
+  flex-direction: row-reverse;
+  justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  min-height: 44px;
+}
+.diary-panel input[type="checkbox"] {
+  appearance: none;
+  flex: none;
+  width: 38px;
+  height: 23px;
+  border: 1px solid var(--border-bright);
+  border-radius: 20px;
+  background: var(--ink);
+  position: relative;
+  cursor: pointer;
+}
+.diary-panel input[type="checkbox"]:before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.diary-panel input[type="checkbox"]:checked {
+  background: var(--blue);
+}
+.diary-panel input[type="checkbox"]:checked:before {
+  left: 18px;
+  background: white;
 }
 .diary-panel :is(input, textarea, select):not([type="checkbox"]) {
   color-scheme: dark;
-  color: #edf4ff;
-  background: #142238;
-  border: 1px solid #445873;
-  border-radius: 0.6rem;
-  padding: 0.65rem;
-  min-width: 0;
+  background: rgba(7, 20, 38, 0.65);
+  border: 1px solid var(--border-bright);
+  border-radius: 12px;
+  color: var(--paper);
   width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 12px;
+  font: inherit;
+}
+.diary-panel input::file-selector-button {
+  border: 0;
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--paper);
+  padding: 6px 10px;
+  margin-right: 8px;
 }
 .diary-panel textarea {
-  min-height: 6rem;
+  min-height: 5.5rem;
 }
-.diary-panel button {
-  justify-self: start;
-  background: #223b5b;
-  color: #eaf5ff;
-  border-radius: 0.6rem;
-  padding: 0.65rem 1rem;
+.diary-panel :focus-visible,
+.asu-card :focus-visible {
+  outline: 2px solid #86baff;
+  outline-offset: 2px;
 }
 .diary-panel button:disabled {
-  opacity: 0.55;
+  opacity: 0.45;
 }
-.diary-panel article {
-  padding: 0.8rem 0;
-  border-bottom: 1px solid #38465a;
+.diary-panel .primary-button,
+.diary-quiet {
+  min-height: 44px;
+  font-size: 13px;
+  justify-self: start;
 }
-.diary-panel p,
+.diary-quiet {
+  justify-content: center;
+  border: 1px solid var(--border-bright);
+  background: #3478d412;
+  border-radius: 12px;
+  padding: 8px 12px;
+  color: #c3dcfa;
+  font-weight: 600;
+}
+.diary-quiet:hover {
+  background: #3478d428;
+}
+.diary-subheading {
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+  font-size: 15px;
+  font-weight: 700;
+}
 .diary-file {
-  color: #b7cbe1;
+  color: #a9ceff;
+  text-decoration: underline;
+  display: block;
   overflow-wrap: anywhere;
 }
-.diary-file {
-  display: block;
-  text-decoration: underline;
+.diary-panel p {
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.diary-panel [role="status"]:empty {
+  display: none;
 }
 .diary-actions {
   display: flex;
-  gap: 0.7rem;
+  gap: 8px;
   flex-wrap: wrap;
+}
+.agenda-today {
+  margin-left: auto;
+}
+.agenda-controls {
+  justify-content: space-between;
+}
+.agenda-controls .icon-button {
+  width: 44px;
+  height: 44px;
+}
+.agenda-controls .agenda-date {
+  position: relative;
+  display: flex;
+  align-items: center;
+  color: var(--paper);
+  min-height: 44px;
+  gap: 8px;
+}
+.agenda-date input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.agenda-date:focus-within {
+  outline: 2px solid var(--electric);
+}
+.agenda-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
+  background: #07142665;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 4px;
+}
+.agenda-week button {
+  min-height: 55px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 1px;
+  border-radius: 10px;
+  line-height: 1.35;
+}
+.agenda-week span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.agenda-week strong {
+  font-size: 16px;
+}
+.agenda-week i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+}
+.agenda-week i.has-class {
+  background: #a4ccff;
+}
+.agenda-week [aria-pressed="true"] {
+  background: var(--blue);
+  box-shadow: inset 0 1px #ffffff25;
+}
+.agenda-week [aria-pressed="true"] span {
+  color: white;
+}
+.agenda-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.agenda-list li {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.agenda-list li:last-child {
+  border: 0;
+}
+.agenda-time {
+  display: grid;
+  align-content: start;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  gap: 2px;
+}
+.agenda-time span,
+.agenda-info small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.agenda-info {
+  border-left: 2px solid var(--border-bright);
+  padding-left: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.in-class .agenda-info {
+  border-color: #69c9ee;
+}
+.agenda-info h3 {
+  font-weight: 700;
+  font-size: 16px;
+  margin: 2px 0;
+}
+.agenda-info > span,
+.agenda-info p {
+  font-size: 12px;
+  color: var(--muted);
+}
+.agenda-empty {
+  padding: 10px 0;
+}
+@media (max-width: 600px) {
+  .diary-panel {
+    gap: 12px;
+    padding: 15px;
+  }
+  .diary-panel :is(input, textarea, select):not([type="checkbox"]) {
+    font-size: 16px;
+  }
+  .diary-heading {
+    padding-bottom: 10px;
+  }
+  .diary-panel .primary-button {
+    width: 100%;
+  }
+  .agenda-controls > div {
+    gap: 4px;
+  }
+  .diary-actions > * {
+    flex: 1;
+  }
 }

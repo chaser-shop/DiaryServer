@@ -314,7 +314,7 @@ function TopBar({
           <Menu size={20} />
         </IconButton>
         <div className="min-w-0">
-          <p className="eyebrow">П’ятниця, 14 березня</p>
+          <p className="eyebrow">{new Intl.DateTimeFormat("uk-UA",{weekday:"long",day:"numeric",month:"long",timeZone:"Europe/Kyiv"}).format(new Date())}</p>
           <h1 className="page-title">Вітаємо, {user.name.split(" ")[0]}</h1>
           <p className="page-subtitle">Ось ваш навчальний ритм на сьогодні</p>
         </div>

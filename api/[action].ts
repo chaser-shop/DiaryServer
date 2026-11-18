@@ -3,61 +3,12 @@ import { diary, scheduleReminders } from "../server/diary.js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { ObjectId, type Db } from "mongodb";
 import bcrypt from "bcryptjs";
-import { SignJWT, jwtVerify } from "jose";
+import { cookie, readSession, startSession, type Session } from "../server/session.js";
+import { groupDto, scheduleOf, subjectLinksOf } from "../server/group.js";
 import { randomInt } from "node:crypto";
-
-const COOKIE = "navs_session";
-const MAX_AGE = 60 * 60 * 24 * 7; // 7 днів
 
 const SUBJECTS = ["kpu", "spou", "it", "english", "vds", "umsp", "sfp", "tidtp"] as const;
 type SubjectKey = (typeof SUBJECTS)[number];
-
-// ---------------------------------------------------------------------------
-// Сесія (JWT у httpOnly cookie)
-// ---------------------------------------------------------------------------
-type Session = { login: string; name: string; role: string; group?: string };
-
-function secret() {
-  const s = process.env.JWT_SECRET;
-  if (!s) throw new Error("JWT_SECRET is not set");
-  return new TextEncoder().encode(s);
-}
-
-function cookie(value: string, maxAge: number) {
-  const secure = process.env.VERCEL ? "; Secure" : "";
-  return `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
-}
-
-async function readSession(req: VercelRequest): Promise<Session | null> {
-  const raw = req.headers.cookie
-    ?.split(";")
-    .map((c) => c.trim())
-    .find((c) => c.startsWith(`${COOKIE}=`))
-    ?.slice(COOKIE.length + 1);
-  if (!raw) return null;
-  try {
-    const { payload } = await jwtVerify(raw, secret());
-    return {
-      login: String(payload.sub),
-      name: String(payload.name ?? ""),
-      role: typeof payload.role === "string" ? payload.role : "student",
-      group: typeof payload.group === "string" ? payload.group : undefined,
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function startSession(res: VercelResponse, s: Session) {
-  const token = await new SignJWT({ name: s.name, role: s.role, group: s.group })
-    .setProtectedHeader({ alg: "HS256" })
-    .setSubject(s.login)
-    .setIssuedAt()
-    .setExpirationTime(`${MAX_AGE}s`)
-    .sign(secret());
-  res.setHeader("Set-Cookie", cookie(token, MAX_AGE));
-  return res.status(200).json({ user: s });
-}
 
 // Фіктивний хеш, щоб час відповіді не видавав, чи існує логін
 const DUMMY_HASH = bcrypt.hashSync("dummy-password", 10);
@@ -234,35 +185,6 @@ function cleanSubjectLinks(value: unknown): { key: string; url: string }[] {
   return result;
 }
 
-const subjectLinksOf = (g: any): { key: string; url: string }[] =>
-  Array.isArray(g?.subjectLinks)
-    ? g.subjectLinks.map((l: any) => ({ key: String(l.key), url: String(l.url) }))
-    : [];
-
-const scheduleOf = (g: any) =>
-  g?.schedule && Array.isArray(g.schedule.lessons)
-    ? {
-        fileName: String(g.schedule.fileName ?? ""),
-        uploadedAt: new Date(g.schedule.uploadedAt ?? Date.now()).toISOString(),
-        groupLabel: g.schedule.groupLabel ? String(g.schedule.groupLabel) : undefined,
-        period: g.schedule.period ? String(g.schedule.period) : undefined,
-        lessons: g.schedule.lessons as LessonDoc[],
-      }
-    : null;
-
-const groupDto = (g: any) => ({
-  id: String(g._id),
-  name: g.name,
-  faculty: g.faculty,
-  course: g.course,
-  academicYear: g.academicYear,
-  curator: g.curator,
-  status: g.status,
-  sessionStart: typeof g.sessionStart === "string" ? g.sessionStart : null,
-  subjectLinks: subjectLinksOf(g),
-  schedule: scheduleOf(g),
-});
-
 const emptyScores = () => Object.fromEntries(SUBJECTS.map((k) => [k, 0])) as Record<SubjectKey, number>;
 
 async function adminAction(action: string, req: VercelRequest, res: VercelResponse, session: Session) {
@@ -411,7 +333,7 @@ async function adminAction(action: string, req: VercelRequest, res: VercelRespon
     }
     const group: any = await db
       .collection("groups")
-      .findOneAndUpdate({ _id: id }, update, { returnDocument: "after" });
+      .findOneAndUpdate({ _id: id }, { ...update, $unset: { ...(update.$unset as object), portal: "" } }, { returnDocument: "after" });
     if (!group) throw new HttpError(404, "Групу не знайдено.");
     await scheduleReminders(db, id);
     await logActivity(db, session.name, { summary: `Група ${group.name}: ${summary}`, entityType: "schedule" });

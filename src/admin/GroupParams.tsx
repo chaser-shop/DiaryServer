@@ -218,6 +218,7 @@ export function ScheduleUploadCard({ group, onSaved, notify }: CardProps) {
         </p>
       )}
 
+      {group.portal && <p className="mt-3 text-xs text-amber-200">Заміна або видалення розкладу вручну вимкне автооновлення НАВС.</p>}
       <input
         ref={inputRef}
         type="file"

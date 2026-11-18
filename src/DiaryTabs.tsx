@@ -1,3 +1,4 @@
+import { Bell, ClipboardPenLine, Settings, Share2, Send, Check, BellRing } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import {
   dayLabel,
@@ -23,61 +24,7 @@ const ordered = (lessons: Lesson[]) =>
   [...lessons].sort((a, b) =>
     (a.date + a.start).localeCompare(b.date + b.start),
   );
-export function Schedule({
-  lessons,
-  now,
-  failed,
-}: {
-  lessons: Lesson[] | null;
-  now: WallClock;
-  failed: boolean;
-}) {
-  const [from, setFrom] = useState(now.date);
-  const rows = ordered(lessons ?? []).filter((l) => l.date >= from);
-  return (
-    <section className="glass-panel content-card diary-panel">
-      <h2>Розклад групи</h2>
-      <label>
-        Показати заняття від
-        <input
-          type="date"
-          value={from}
-          onChange={(e) => setFrom(e.target.value)}
-        />
-      </label>
-      {failed ? (
-        <p role="alert">Не вдалося отримати розклад.</p>
-      ) : !lessons ? (
-        <p>Очікуємо на розклад групи.</p>
-      ) : !rows.length ? (
-        <p>Занять після вибраної дати немає.</p>
-      ) : (
-        [...new Set(rows.map((l) => l.date))].map((date) => (
-          <section key={date}>
-            <h3>
-              {dayLabel(date, now.date)} · {longDate(date)}
-            </h3>
-            {rows
-              .filter((l) => l.date === date)
-              .map((l, i) => (
-                <article key={key(l) + i}>
-                  <strong>
-                    {l.start}–{l.end} · {l.subject}
-                  </strong>
-                  <p>
-                    {[kindLabel(l.kind), l.teacher, l.room]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                </article>
-              ))}
-          </section>
-        ))
-      )}
-    </section>
-  );
-}
-
+export { Schedule } from "./DaySchedule";
 function readFile(file: File): Promise<{ name: string; data: string }> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -146,9 +93,9 @@ export function Composer({
   }
   return (
     <section className="glass-panel content-card diary-panel">
-      <h2>Що задали?</h2>
+      <header className="diary-heading"><span className="diary-symbol"><ClipboardPenLine size={20}/></span><h2 className="section-title">Що задали?</h2></header>
       {past[0] && !lesson && (
-        <button
+        <button className="primary-button"
           onClick={() => {
             setSelected(key(past[0]));
             setMode("next");
@@ -210,7 +157,7 @@ export function Composer({
             Фото та файли (до 5, разом до 3 МіБ)
             <input name="files" type="file" multiple />
           </label>
-          <button disabled={busy}>
+          <button className="primary-button" disabled={busy}><Check size={16}/>
             {busy ? "Зберігаємо…" : "Додати завдання"}
           </button>
         </form>
@@ -298,7 +245,7 @@ export function DiarySettings() {
   }
   return (
     <section className="glass-panel content-card diary-panel">
-      <h2>Налаштування</h2>
+      <header className="diary-heading"><span className="diary-symbol"><Settings size={20}/></span><h2 className="section-title">Налаштування</h2></header>
       {prefs && (
         <>
           <form
@@ -328,7 +275,7 @@ export function DiarySettings() {
                 }
               />
             </label>
-            <h3>Сповіщення на пристрої</h3>
+            <h3 className="diary-subheading"><BellRing size={16}/>Сповіщення на пристрої</h3>
             <label>
               <input
                 type="checkbox"
@@ -363,14 +310,14 @@ export function DiarySettings() {
               />{" "}
               Повідомляти про нове домашнє завдання
             </label>
-            <button disabled={busy}>Зберегти налаштування</button>
+            <button className="primary-button" disabled={busy}><Check size={16}/>Зберегти налаштування</button>
           </form>
           {supports ? (
             <div className="diary-actions">
-              <button disabled={busy} onClick={() => run(device)}>
+              <button className="diary-quiet" disabled={busy} onClick={() => run(device)}><Bell size={16}/>
                 {sub ? "Вимкнути push" : "Увімкнути push"}
               </button>
-              <button
+              <button className="diary-quiet"
                 disabled={!sub || busy}
                 onClick={() =>
                   run(async () => {
@@ -381,7 +328,7 @@ export function DiarySettings() {
                   })
                 }
               >
-                Тестове сповіщення
+                <Send size={15}/> Тестове сповіщення
               </button>
             </div>
           ) : (
@@ -390,7 +337,7 @@ export function DiarySettings() {
               початкового екрана.
             </p>
           )}
-          <button
+          <button className="diary-quiet"
             disabled={busy}
             onClick={() =>
               run(async () => {
@@ -409,7 +356,7 @@ export function DiarySettings() {
               })
             }
           >
-            Поділитися щоденником
+            <Share2 size={15}/> Поділитися щоденником
           </button>
         </>
       )}

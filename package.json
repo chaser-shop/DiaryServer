@@ -10,11 +10,13 @@
     "seed": "node --env-file=.env.local scripts/seed.mjs"
   },
   "dependencies": {
+    "@sparticuz/chromium": "^153.0.0",
     "@vercel/queue": "^0.11.0",
     "bcryptjs": "^2.4.3",
     "jose": "^5.9.6",
     "lucide-react": "^1.74.0",
     "mongodb": "^6.10.0",
+    "playwright-core": "^1.58.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "web-push": "^3.6.7",
