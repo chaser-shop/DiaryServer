@@ -1,5 +1,7 @@
+import { getDb } from "../server/db.js";
+import { diary, scheduleReminders } from "../server/diary.js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { MongoClient, ObjectId, type Db } from "mongodb";
+import { ObjectId, type Db } from "mongodb";
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import { randomInt } from "node:crypto";
@@ -9,55 +11,6 @@ const MAX_AGE = 60 * 60 * 24 * 7; // 7 днів
 
 const SUBJECTS = ["kpu", "spou", "it", "english", "vds", "umsp", "sfp", "tidtp"] as const;
 type SubjectKey = (typeof SUBJECTS)[number];
-
-// ---------------------------------------------------------------------------
-// MongoDB (кешується між викликами serverless-функції)
-// Колекції: users (службові), groups, students, grades, lessons, activity
-// ---------------------------------------------------------------------------
-const globalForMongo = globalThis as unknown as { __navsDb?: Promise<Db> };
-
-function getDb(): Promise<Db> {
-  if (!globalForMongo.__navsDb) {
-    const uri = process.env.MONGODB_URI;
-    if (!uri) throw new Error("MONGODB_URI is not set");
-    globalForMongo.__navsDb = (async () => {
-      const client = await new MongoClient(uri).connect();
-      const db = client.db(process.env.MONGODB_DB || "navs-era");
-      const users = db.collection("users");
-      // Помилка індексу не повинна блокувати вхід.
-      const safe = (p: Promise<unknown>) =>
-        p.catch((e) => console.warn("createIndex skipped:", e instanceof Error ? e.message : e));
-      await safe(
-        users.createIndex(
-          { login: 1 },
-          { unique: true, partialFilterExpression: { login: { $type: "string" } } },
-        ),
-      );
-      await safe(db.collection("students").createIndex({ login: 1 }, { unique: true }));
-      await safe(db.collection("groups").createIndex({ name: 1 }, { unique: true }));
-      await safe(db.collection("grades").createIndex({ studentId: 1 }, { unique: true }));
-      // Початковий користувач: admin / admin123 (створюється один раз)
-      await users.updateOne(
-        { login: "admin" },
-        {
-          $setOnInsert: {
-            login: "admin",
-            passwordHash: await bcrypt.hash("admin123", 10),
-            name: "Адміністратор",
-            role: "admin",
-            createdAt: new Date(),
-          },
-        },
-        { upsert: true },
-      );
-      return db;
-    })().catch((err) => {
-      globalForMongo.__navsDb = undefined;
-      throw err;
-    });
-  }
-  return globalForMongo.__navsDb;
-}
 
 // ---------------------------------------------------------------------------
 // Сесія (JWT у httpOnly cookie)
@@ -460,6 +413,7 @@ async function adminAction(action: string, req: VercelRequest, res: VercelRespon
       .collection("groups")
       .findOneAndUpdate({ _id: id }, update, { returnDocument: "after" });
     if (!group) throw new HttpError(404, "Групу не знайдено.");
+    await scheduleReminders(db, id);
     await logActivity(db, session.name, { summary: `Група ${group.name}: ${summary}`, entityType: "schedule" });
     return res.status(200).json({ group: groupDto(group) });
   }
@@ -636,6 +590,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = String(req.query.action);
 
   try {
+    if (action.startsWith("diary-")) {
+      const session = await readSession(req);
+      if (!session || session.role !== "student") return res.status(403).json({ error: "Потрібен вхід студента." });
+      const db = await getDb();
+      const student = await db.collection("students").findOne({ login: session.login });
+      if (!student || student.status === "expelled") return res.status(403).end();
+      return await diary(action, req, res, db, student);
+    }
     if (action === "health") {
       const env = {
         MONGODB_URI: !!process.env.MONGODB_URI,

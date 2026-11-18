@@ -3,7 +3,7 @@ import type { Scores } from "./subjects";
 
 export type GroupStudent = { id: string; name: string; scores: Scores };
 
-async function request<T>(action: string, body?: unknown): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
+export async function request<T>(action: string, body?: unknown): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
   try {
     const res = await fetch(`/api/${action}`, {
       method: body === undefined ? "GET" : "POST",

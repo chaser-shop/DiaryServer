@@ -1,0 +1,68 @@
+.diary-panel {
+  max-width: 58rem;
+  margin-bottom: 1rem;
+  display: grid;
+  gap: 1rem;
+  color: #e8f1fe;
+}
+.diary-panel h2 {
+  font-size: 1.45rem;
+  font-weight: 700;
+}
+.diary-panel h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.diary-panel form,
+.diary-panel label {
+  display: grid;
+  gap: 0.55rem;
+}
+.diary-panel form {
+  gap: 1rem;
+}
+.diary-panel label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: center;
+}
+.diary-panel :is(input, textarea, select):not([type="checkbox"]) {
+  color-scheme: dark;
+  color: #edf4ff;
+  background: #142238;
+  border: 1px solid #445873;
+  border-radius: 0.6rem;
+  padding: 0.65rem;
+  min-width: 0;
+  width: 100%;
+}
+.diary-panel textarea {
+  min-height: 6rem;
+}
+.diary-panel button {
+  justify-self: start;
+  background: #223b5b;
+  color: #eaf5ff;
+  border-radius: 0.6rem;
+  padding: 0.65rem 1rem;
+}
+.diary-panel button:disabled {
+  opacity: 0.55;
+}
+.diary-panel article {
+  padding: 0.8rem 0;
+  border-bottom: 1px solid #38465a;
+}
+.diary-panel p,
+.diary-file {
+  color: #b7cbe1;
+  overflow-wrap: anywhere;
+}
+.diary-file {
+  display: block;
+  text-decoration: underline;
+}
+.diary-actions {
+  display: flex;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
