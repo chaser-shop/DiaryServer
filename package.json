@@ -10,15 +10,15 @@
     "seed": "node --env-file=.env.local scripts/seed.mjs"
   },
   "dependencies": {
-    "@sparticuz/chromium": "^153.0.0",
     "@vercel/queue": "^0.11.0",
     "bcryptjs": "^2.4.3",
+    "cheerio": "^1.0.0",
     "jose": "^5.9.6",
     "lucide-react": "^1.74.0",
     "mongodb": "^6.10.0",
-    "playwright-core": "^1.58.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "tough-cookie": "^6.1.0",
     "web-push": "^3.6.7",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },

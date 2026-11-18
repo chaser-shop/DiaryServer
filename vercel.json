@@ -25,12 +25,10 @@
           "topic": "navs-group-sync"
         }
       ],
-      "maxDuration": 180,
-      "includeFiles": "node_modules/@sparticuz/chromium/bin/**"
+      "maxDuration": 180
     },
     "api/admin-portal.ts": {
-      "maxDuration": 180,
-      "includeFiles": "node_modules/@sparticuz/chromium/bin/**"
+      "maxDuration": 180
     }
   }
 }

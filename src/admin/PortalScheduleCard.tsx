@@ -26,6 +26,7 @@ export function PortalScheduleCard({
       setLoading(false);
       return;
     }
+    setLists((old) => old.slice(0, values.length));
     setLoading(true);
     request<{ options: Option[] }>("admin-portal", {
       mode: "options",
@@ -128,12 +129,13 @@ export function PortalScheduleCard({
             >
               {busy ? "Завантаження…" : "Підключити автооновлення"}
             </button>
-            {error && values.length < 3 && (
+            {values.length < 3 && (
               <button
                 className="diary-quiet"
+                disabled={loading || busy}
                 onClick={() => setRetry((x) => x + 1)}
               >
-                Повторити
+                {error ? "Повторити" : "Оновити список"}
               </button>
             )}
             {group.portal && (

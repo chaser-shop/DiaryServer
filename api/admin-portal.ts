@@ -3,7 +3,7 @@ import { ObjectId } from "mongodb";
 import { getDb } from "../server/db.js";
 import { groupDto } from "../server/group.js";
 import { readSession } from "../server/session.js";
-import { readPortal } from "../server/portal.js";
+import { PortalError, readPortal } from "../server/portal.js";
 import { refreshGroup } from "../server/groupSync.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -20,9 +20,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: "Некоректний вибір групи." });
   const id = new ObjectId(groupId);
   try {
-    const db = await getDb();
     if (mode === "options" && values.length <= 2)
       return res.json({ options: (await readPortal(values)).options });
+    const db = await getDb();
     if (mode === "disconnect") {
       const g = await db
         .collection("groups")
@@ -47,10 +47,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       "Portal timetable",
       e instanceof Error ? e.message : "Unknown error",
     );
-    return res
-      .status(502)
-      .json({
-        error: "Не вдалося отримати розклад з порталу НАВС. Спробуйте ще раз.",
-      });
+    return res.status(502).json({
+      error:
+        e instanceof PortalError
+          ? e.message
+          : "Не вдалося зберегти налаштування розкладу. Спробуйте ще раз.",
+    });
   }
 }
